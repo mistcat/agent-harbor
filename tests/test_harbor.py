@@ -135,7 +135,7 @@ def test_boat_turns_at_edge():
 
 def hull_line(boats, ags, frame=0, width=60):
     lines = render_harbor(ags, boats, width, 10, frame).plain.split("\n")
-    return next(l for l in lines if "\\" in l)
+    return next(l for l in lines if "\\_" in l)
 
 
 def test_wake_behind_moving_boat():
@@ -145,7 +145,7 @@ def test_wake_behind_moving_boat():
         boats, _ = layout(ags, 60, 10, {})
         boats["main"].x, boats["main"].direction = 30.0, direction
         line = hull_line(boats, ags)
-        x = line.index("\\")
+        x = line.index("\\_")
         behind = line[x - 3:x] if direction == 1 else line[x + w:x + w + 3]
         ahead = line[x + w:x + w + 3] if direction == 1 else line[x - 3:x]
         assert behind.strip() and not ahead.strip()
@@ -156,7 +156,7 @@ def test_no_wake_for_anchored_boat():
     boats, _ = layout(done, 60, 10, {})
     boats["d"].x = 30.0
     line = hull_line(boats, done)
-    x = line.index("\\")
+    x = line.index("\\_")
     assert not line[x - 3:x].strip() and not line[x + 5:x + 8].strip()
 
 
@@ -258,3 +258,96 @@ def test_flotilla_does_not_pile_up_at_the_edges():
             frames += 1
             bad += bool(overlapping_pairs(boats))
     assert bad / frames < 0.05, f"{bad}/{frames} frames had same-lane boats overlapping"
+
+
+# ---- Pirate captain ----
+from agent_panel.harbor import captain_pose, CAPTAIN_COLOR
+from agent_panel.colors import model_color
+from agent_panel.cli import parse_args
+
+
+def captain_positions(t, w):
+    """Columns/rows (y, x) of cells whose style is the captain color."""
+    pos = []
+    for span in t.spans:
+        if CAPTAIN_COLOR in str(span.style):
+            for i in range(span.start, span.end):
+                pos.append((i // (w + 1), i % (w + 1)))
+    return pos
+
+
+def test_captain_color_is_distinct_from_model_colors():
+    assert CAPTAIN_COLOR not in {model_color(m) for m in ("opus 5", "sonnet 5", "haiku 5", "zzz")}
+
+
+def test_pose_idle_commanding_firing():
+    idle = [ag("main", None, 0, "main", status="idle"), ag("a1", "main", 1, "t", status="done")]
+    assert captain_pose(idle, False) == "idle"
+    solo = [ag("main", None, 0, "main", status="running")]
+    assert captain_pose(solo, False) == "idle"
+    cmd = [ag("main", None, 0, "main", status="running"), ag("a1", "main", 1, "t", status="running")]
+    assert captain_pose(cmd, False) == "commanding"
+    assert captain_pose(cmd, True) == "firing"
+    assert captain_pose(idle, True) == "firing"
+
+
+def test_captain_only_above_the_main_boat():
+    ags = agents(3)
+    boats, _ = layout(ags, 70, 20, {})
+    t = render_harbor(ags, boats, 70, 20, 0)
+    pos = captain_positions(t, 70)
+    assert pos
+    m = boats["main"]
+    w = len(SPRITES["rowboat"][0])
+    assert all(m.x <= x < m.x + w for _, x in pos)
+    t2 = render_harbor(ags, boats, 70, 20, 0, captain=False)
+    assert not captain_positions(t2, 70)
+
+
+def test_captain_works_at_every_tier_and_moves_with_the_boat():
+    for burn in (1, 60_000, 900_000):
+        ags = [ag("main", None, 0, "main", burn=burn, status="running")]
+        boats, _ = layout(ags, 60, 14, {})
+        boats["main"].x = 5.0
+        a = captain_positions(render_harbor(ags, boats, 60, 14, 0), 60)
+        boats["main"].x = 25.0
+        b = captain_positions(render_harbor(ags, boats, 60, 14, 0), 60)
+        assert a and sorted((y, x + 20) for y, x in a) == sorted(b)
+
+
+def test_captain_stays_in_the_water_box_and_leaves_subagents_alone():
+    ags = agents(5, burn=900_000)
+    for w, h in [(50, 10), (30, 8), (80, 20), (12, 8), (5, 8)]:
+        boats, _ = layout(ags, w, h, {})
+        t = render_harbor(ags, boats, w, h, 3, flash=True)
+        assert all(0 <= y < h - 1 and 0 <= x < w for y, x in captain_positions(t, w))
+
+
+def test_firing_shows_call_out_and_commanding_differs_from_idle():
+    ags = [ag("main", None, 0, "main", status="running"), ag("a1", "main", 1, "t", status="running")]
+    boats, _ = layout(ags, 60, 14, {})
+    plain = lambda **kw: render_harbor(ags, boats, 60, 14, 0, **kw).plain
+    assert "Fire!" in plain(flash=True) and "Fire!" not in plain()
+    idle_ags = [ag("main", None, 0, "main", status="running")]
+    iboats, _ = layout(idle_ags, 60, 14, {})
+    assert render_harbor(idle_ags, iboats, 60, 14, 0).plain != plain()
+
+
+def test_anchored_main_gets_zzz_beside_the_captain():
+    ags = [ag("main", None, 0, "main", status="idle")]
+    boats, _ = layout(ags, 60, 14, {})
+    assert "zzz" in render_harbor(ags, boats, 60, 14, 0).plain
+    assert "zzz" in render_harbor(ags, boats, 60, 14, 0, captain=False).plain
+
+
+def test_narrow_and_tiny_harbors_do_not_raise():
+    ags = agents(4, burn=900_000)
+    for w, h in [(50, 8), (50, 9), (1, 1), (3, 8), (10, 2)]:
+        boats, _ = layout(ags, w, h, {})
+        for flash in (False, True):
+            render_harbor(ags, boats, w, h, 0, flash=flash)
+
+
+def test_no_captain_flag():
+    assert parse_args([]).no_captain is False
+    assert parse_args(["--no-captain"]).no_captain is True

@@ -12,6 +12,7 @@ A live, read-only terminal panel for a Rex pane. It follows a Claude Code sessio
 
 - **Top, the tree:** one row per agent, nested by parent, with model, effort, token burn and status.
 - **Bottom, the harbor:** the same agents as boats on the water. Running boats sail with a wake, finished ones anchor and snooze, children sail behind their parent as a flotilla. An advisor call makes the main ship fire a cannon, with a sound.
+- **The captain:** a small pirate with a gold hat stands on the main ship's deck, at any size of boat. Arms down while idle (with `zzz` when the whole flotilla is anchored), an arm raised while any subagent runs, and a "Fire!" call-out during the cannon flash. Subagent boats have no captain. It is dropped, not clipped, when it doesn't fit; `--no-captain` turns it off.
 
 ## Read-only promise
 
@@ -46,6 +47,7 @@ Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-pane
 | `--session ID` | pin one session instead of following the newest |
 | `--config-dir PATH` | Claude config dir to read |
 | `--no-sound` | no cannon boom |
+| `--no-captain` | no pirate captain on the main ship |
 
 Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches.
 
@@ -53,7 +55,7 @@ Without `--session` it follows the newest session in the project and only switch
 
 Works at 50 columns. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`.
 
-Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green.
+Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. The captain's gold hat is reserved for the captain.
 
 Boat size follows token burn (input + cache creation + output, counted once per message):
 

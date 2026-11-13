@@ -1,10 +1,6 @@
 # Roadmap
 
-1. **Pirate captain for the main session.** A small captain figure in the harbor standing in for the main
-   session, on the main ship's deck or on the dock giving orders. The main ship's sprite is already kept
-   separate from the subagent boats (`MAIN_SPRITE_KEY` in `agent_panel/boats.py`) so the captain can replace
-   it without reworking them.
-2. **`agent-session panel` command.** Open `agent-panel` in a Rex split beside the controller (or beside a
+1. **`agent-session panel` command.** Open `agent-panel` in a Rex split beside the controller (or beside a
    named agent session) with one command, instead of the long `rex split ... -- agent-panel` line.
 
 ## Later

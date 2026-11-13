@@ -11,6 +11,16 @@ SPEED = 6.0  # cells per second for a running boat
 WAKE = "~-."  # nearest to farthest behind the hull
 LANE_H = 5  # tallest sprite
 SLOT_W = 10  # widest sprite plus a gap
+CAPTAIN_COLOR = "gold1"  # not used by any model family
+CAPTAIN_W = 3
+CALL_OUT = "Fire!"
+# Captain frames facing right (flotilla astern, on the left); mirrored when sailing left. Rows: hat, head+arms, body.
+_CAPTAIN = {
+    "idle": ["_^_", " o ", "/|\\"],
+    "firing": ["_^_", " o/", "/| "],
+    "commanding": ["_^_", "\\o ", " |\\"],
+}
+_MIRROR = str.maketrans("/\\", "\\/")
 
 
 @dataclass
@@ -33,6 +43,18 @@ def active_ids(agents: list[Agent]) -> set[str]:
                 active.add(cur.id)
                 cur = by_id.get(cur.parent_id) if cur.parent_id else None
     return active
+
+
+def captain_pose(agents: list[Agent], flash: bool) -> str:
+    """"firing" during the cannon flash, "commanding" while any subagent runs, else "idle"."""
+    if flash:
+        return "firing"
+    return "commanding" if any(a.status == "running" and a.id != "main" for a in agents) else "idle"
+
+
+def _captain_lines(pose: str, direction: int) -> list[str]:
+    lines = _CAPTAIN[pose]
+    return lines if direction > 0 else [l.translate(_MIRROR)[::-1] for l in lines]
 
 
 def _lanes(width: int, height: int) -> tuple[int, int]:
@@ -72,7 +94,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
 
 
 def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int,
-                  shots=(), flash: bool = False) -> Text:
+                  shots=(), flash: bool = False, captain: bool = True) -> Text:
     width, height = max(width, 1), max(height, 1)
     grid = [[(" ", "")] * width for _ in range(height)]
     grid[height - 1] = [("~", "dodger_blue3")] * width
@@ -94,12 +116,14 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
                 if ch != " " and 0 <= y < height - 1 and 0 <= x < width:
                     grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "grey70")
         hull_y = top + len(sprite) - 1
+        seated = captain and b.agent_id == "main" and _seat_captain(
+            grid, b, x0, hull_y, len(sprite[0]), height, CALL_OUT if flash else "zzz" if a.id not in active else "", captain_pose(agents, flash))
         if a.id in active:
             for i, ch in enumerate(WAKE):
                 x = x0 - 1 - i if b.direction == 1 else x0 + len(sprite[0]) + i
                 if 0 <= x < width and 0 <= hull_y < height - 1 and grid[hull_y][x][0] == " ":
                     grid[hull_y][x] = (ch, "dodger_blue3" if i < 2 else "grey42")
-        else:
+        elif not seated:
             zx = x0 + len(sprite[0]) // 2 + 1
             for i, ch in enumerate("zzz"):
                 if 0 <= top - 1 < height - 1 and 0 <= zx + i < width and grid[top - 1][zx + i][0] == " ":
@@ -121,6 +145,35 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         if y < height - 1:
             out.append("\n")
     return out
+
+
+def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say: str, pose: str) -> bool:
+    """Stand the captain on the deck at the stern, with `say` beside the head. False (nothing drawn) if it
+    would leave the harbor or touch another boat; a call-out that doesn't fit is dropped, not the captain."""
+    width = len(grid[0])
+    figure = _captain_lines(pose, b.direction)
+    cx = x0 + (1 if b.direction > 0 else w - 1 - CAPTAIN_W)
+    top = hull_y - len(figure)
+    if cx < 0 or cx + CAPTAIN_W > width or top < 0 or hull_y > height - 2:
+        return False
+    own = lambda x, y: x0 <= x < x0 + w and top <= y <= hull_y  # cells this boat may overwrite
+    for dy, line in enumerate(figure):
+        for dx, ch in enumerate(line):
+            if ch != " " and grid[top + dy][cx + dx][0] != " " and not own(cx + dx, top + dy):
+                return False
+    for dy, line in enumerate(figure):
+        for dx, ch in enumerate(line):
+            if ch != " ":
+                grid[top + dy][cx + dx] = (ch, CAPTAIN_COLOR if dy == 0 else "bright_white")
+    if say:
+        sx = cx + CAPTAIN_W if b.direction > 0 else cx - len(say)
+        y = top + 1
+        cells = [(sx + i, y) for i in range(len(say))]
+        if all(0 <= x < width and (grid[y][x][0] == " " or own(x, y)) for x, y in cells):
+            style = "bold red" if say == CALL_OUT else "grey50"
+            for (x, y), ch in zip(cells, say):
+                grid[y][x] = (ch, style)
+    return True
 
 
 def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> None:

@@ -28,8 +28,9 @@ class AgentPanelApp(App):
     #harbor { height: 1fr; }
     """
 
-    def __init__(self, watcher: Watcher | None, waiting_dir: Path, boomer: Boomer | None = None):
+    def __init__(self, watcher: Watcher | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True):
         super().__init__()
+        self.captain = captain
         self.boomer = boomer if boomer is not None else Boomer(True)
         self.shots: list[Shot] = []
         self.flash = 0
@@ -114,7 +115,7 @@ class AgentPanelApp(App):
         width = self.size.width
         self.boats, _ = layout(snap.agents, width, rows, self.boats)
         step(self.boats, snap.agents, self._dt, width)
-        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame, self.shots, self.flash > 0))
+        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame, self.shots, self.flash > 0, self.captain))
 
     def _show(self, widget: Static, text: Text) -> None:
         if self._shown.get(widget.id) != text:
