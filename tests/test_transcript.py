@@ -85,3 +85,9 @@ def test_short_model():
     assert short_model("claude-fable-5-1") == "fable 5.1"
     assert short_model(None) == "?"
     assert short_model("gpt-weird") == "gpt-weird"
+
+
+def test_short_model_two_part_ids():
+    # Real transcripts contain ids with no minor version, e.g. claude-opus-5.
+    assert short_model("claude-opus-5") == "opus 5"
+    assert short_model("claude-sonnet-5") == "sonnet 5"

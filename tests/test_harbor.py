@@ -238,3 +238,23 @@ def test_done_child_stays_anchored_when_parent_sails():
     x = boats["a1"].x
     sail(ags, boats, 2.0)
     assert boats["a1"].x == x
+
+
+def overlapping_pairs(boats):
+    w = len(SPRITES["rowboat"][0])
+    ids = sorted(boats)
+    return [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
+            if boats[a].lane == boats[b].lane and abs(boats[a].x - boats[b].x) < w]
+
+
+def test_flotilla_does_not_pile_up_at_the_edges():
+    ags = [ag("main", None, 0, "main", burn=1)] + [ag(f"a{i}", "main", 1, "k", burn=1) for i in (1, 2)]
+    boats, _ = layout(ags, 50, 20, {})
+    bad = 0
+    frames = 0
+    for n in range(600):  # 60 s: several turns at each edge
+        step(boats, ags, 0.1, 50)
+        if n > 100:  # let the fleet settle into formation first
+            frames += 1
+            bad += bool(overlapping_pairs(boats))
+    assert bad / frames < 0.05, f"{bad}/{frames} frames had same-lane boats overlapping"

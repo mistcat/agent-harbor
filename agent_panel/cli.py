@@ -23,6 +23,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     cwd = args.cwd.resolve()
     # The watcher tolerates a project dir that doesn't exist yet and keeps polling for it.
-    watcher = Watcher(lambda: resolve_project(cwd, args.config_dir), pinned=args.session)
+    watcher = Watcher(lambda: resolve_project(cwd, args.config_dir, session=args.session), pinned=args.session)
     AgentPanelApp(watcher, cwd, Boomer(not args.no_sound)).run()
     return 0

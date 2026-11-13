@@ -225,3 +225,24 @@ def test_watcher_accepts_a_resolver_and_finds_a_late_profile(tmp_path):
     state["dir"] = tmp_path / "real"
     make_session(state["dir"], "late")
     assert w.poll().session_id == "late"
+
+
+def test_replaced_transcript_does_not_refire_the_cannon(tmp_path):
+    p = make_session(tmp_path, "s1", main_blocks=[advisor_call(), advisor_call("2026-11-13T12:00:05Z")])
+    w = Watcher(tmp_path)
+    assert w.poll().new_shots == 0
+    write_jsonl(p, [assistant("m1", OPUS, U, blocks=[advisor_call()])])  # replaced, smaller
+    snap = w.poll()
+    assert snap.new_shots == 0 and snap.agents[0].advisor_calls == 1
+    with open(p, "a") as f:
+        f.write(json.dumps(assistant("m2", OPUS, U, blocks=[advisor_call("2026-11-13T13:00:00Z")])) + "\n")
+    assert w.poll().new_shots == 1  # genuinely new calls still fire afterwards
+
+
+def test_pinned_session_found_in_a_profile_that_is_not_newest(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    cwd = Path("/work/demo")
+    make_session(tmp_path / ".claude" / "projects" / "-work-demo", "newer", mtime=2000)
+    make_session(tmp_path / ".claude-work" / "projects" / "-work-demo", "wanted", mtime=1000)
+    w = Watcher(lambda: resolve_project(cwd, home=tmp_path, session="wanted"), pinned="wanted")
+    assert w.poll().session_id == "wanted"

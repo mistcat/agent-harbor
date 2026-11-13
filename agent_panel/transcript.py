@@ -98,8 +98,10 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
 
 
 def short_model(model_id: str | None) -> str:
-    """claude-sonnet-5-5 -> 'sonnet 5.5'; None -> '?'; unknown shapes unchanged."""
+    """claude-sonnet-5-5 -> 'sonnet 5.5', claude-opus-5 -> 'opus 5'; None -> '?'; unknown shapes unchanged."""
     if not model_id:
         return "?"
-    m = re.fullmatch(r"claude-([a-z]+)-(\d+)-(\d+)", model_id)
-    return f"{m[1]} {m[2]}.{m[3]}" if m else model_id
+    m = re.fullmatch(r"claude-([a-z]+)-(\d+)(?:-(\d+))?", model_id)
+    if not m:
+        return model_id
+    return f"{m[1]} {m[2]}.{m[3]}" if m[3] else f"{m[1]} {m[2]}"

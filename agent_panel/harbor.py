@@ -50,14 +50,17 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         w = sprite_width(sprite_key(a.id, t))
         if old and old.lane < lanes and 0 <= old.x <= width - w:
             boats[a.id] = Boat(a.id, old.x, old.lane, old.direction, t)
+    siblings: dict[str, int] = {}
     for a in chosen:
         if a.id in boats:
             continue
         t = tier(a.burn)
         order = list(range(lanes))  # lane 0 is the waterline lane; fill it first
         parent = boats.get(a.parent_id) if a.parent_id else None
-        if parent:  # a child sails in the lane above its parent when there is one
-            pref = parent.lane + 1 if parent.lane + 1 < lanes else parent.lane
+        if parent:  # siblings fan out over the lanes above their parent, so they never share a lane while one is free
+            above = lanes - 1 - parent.lane
+            pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
+            siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
             order = [pref] + [l for l in order if l != pref]
         for lane in order:
             slot = next((s for s in range(per_lane)
@@ -128,17 +131,23 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
         b = boats.get(a.id)
         if b is None or a.id not in active:
             continue
-        w = sprite_width(sprite_key(b.agent_id, b.tier))
         parent = boats.get(a.parent_id) if a.parent_id else None
-        if parent and a.parent_id in active:
-            k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
-            target = parent.x - parent.direction * SLOT_W * k
-            b.direction = parent.direction
-            b.x += (target - b.x) * min(1.0, 4 * dt)
-            b.x = min(max(b.x, 0.0), float(max(width - w, 0)))
+        if not parent or a.parent_id not in active:
+            _sail(b, dt, width)
             continue
-        b.x += b.direction * SPEED * dt
-        if b.x > width - w:
-            b.x, b.direction = float(max(width - w, 0)), -1
-        elif b.x < 0:
-            b.x, b.direction = 0.0, 1
+        k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
+        w = sprite_width(sprite_key(b.agent_id, b.tier))
+        b.direction = parent.direction
+        target = parent.x - parent.direction * SLOT_W * k
+        if 0 <= target <= width - w:  # out of range (leader at an edge): hold, don't pile up
+            b.x += (target - b.x) * min(1.0, 4 * dt)
+        b.x = min(max(b.x, 0.0), float(max(width - w, 0)))
+
+
+def _sail(b: Boat, dt: float, width: int) -> None:
+    w = sprite_width(sprite_key(b.agent_id, b.tier))
+    b.x += b.direction * SPEED * dt
+    if b.x > width - w:
+        b.x, b.direction = float(max(width - w, 0)), -1
+    elif b.x < 0:
+        b.x, b.direction = 0.0, 1

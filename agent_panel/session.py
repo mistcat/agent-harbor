@@ -36,11 +36,12 @@ def _mtime(p: Path) -> float:
         return 0.0
 
 
-def resolve_project(cwd: Path, explicit: Path | None = None, home: Path | None = None) -> Path:
+def resolve_project(cwd: Path, explicit: Path | None = None, home: Path | None = None, session: str | None = None) -> Path:
     """The project dir to follow (it may not exist yet).
 
     Order: --config-dir, then $CLAUDE_CONFIG_DIR, then the profile among ~/.claude and ~/.claude-*
-    whose copy of the project has the most recently written transcript. Rex panes don't inherit
+    whose copy of the project has the most recently written transcript (or, with `session`, the one
+    that holds that session's transcript). Rex panes don't inherit
     CLAUDE_CONFIG_DIR, so the fallback is what makes a bare `agent-panel` work there.
     """
     if explicit:
@@ -54,6 +55,8 @@ def resolve_project(cwd: Path, explicit: Path | None = None, home: Path | None =
         proj = slug_dir(cwd, cfg)
         if not proj.is_dir():
             continue
+        if session and (proj / f"{session}.jsonl").exists():
+            return proj
         t = max((_mtime(f) for f in proj.glob("*.jsonl")), default=0.0)
         if t > best_t:
             best, best_t = proj, t
@@ -96,8 +99,10 @@ class Watcher:
     def _read(self, path: Path, skip_sidechain: bool) -> int:
         tail = self._tails.setdefault(path, Tail(path))
         entries = tail.poll()
-        if tail.was_reset:
+        if tail.was_reset:  # a replaced file is a re-baseline: its old calls are not new shots
             self._stats[path] = FileStats()
+            fold(self._stats[path], entries, skip_sidechain)
+            return 0
         stats = self._stats.setdefault(path, FileStats())
         return fold(stats, entries, skip_sidechain)
 

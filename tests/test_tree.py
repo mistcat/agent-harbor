@@ -81,3 +81,7 @@ def test_tree_pulse_moves_with_frame():
     assert line_for(lines(running, frame=0), "run") != line_for(lines(running, frame=1), "run")
     done = [ag("main", None, 0, "main"), ag("a1", "main", 1, "fin", status="done")]
     assert line_for(lines(done, frame=0), "fin") == line_for(lines(done, frame=1), "fin")
+
+
+def test_two_part_model_keeps_family_color():
+    assert model_color("opus 5") == model_color("opus 5.5") != model_color("fable 5.1")
