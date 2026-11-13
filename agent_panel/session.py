@@ -18,9 +18,13 @@ def config_dir() -> Path:
     return Path(env) if env else Path.home() / ".claude"
 
 
-def project_dir(cwd: Path, cfg: Path) -> Path | None:
+def slug_dir(cwd: Path, cfg: Path) -> Path:
     # Every non-alphanumeric char becomes "-" (checked against real project dirs).
-    p = cfg / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    return cfg / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+
+
+def project_dir(cwd: Path, cfg: Path) -> Path | None:
+    p = slug_dir(cwd, cfg)
     return p if p.is_dir() else None
 
 

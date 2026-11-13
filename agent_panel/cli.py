@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 
+from agent_panel.session import Watcher, config_dir, slug_dir
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -13,5 +15,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parse_args(argv)
+    from agent_panel.app import AgentPanelApp
+
+    args = parse_args(argv)
+    cwd = args.cwd.resolve()
+    # The watcher tolerates a project dir that doesn't exist yet and keeps polling for it.
+    watcher = Watcher(slug_dir(cwd, config_dir()), pinned=args.session)
+    AgentPanelApp(watcher, cwd).run()
     return 0
