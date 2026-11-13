@@ -1,4 +1,12 @@
-# agent-panel
+# agent-harbor
+
+Tooling for watching and running Claude Code agents in [Rex](https://rex.sh) panes.
+
+- **`agent-panel`**: a live, read-only view of a Claude session's agents (below).
+- **`agent-session`**: run parallel agents, one git worktree and Rex session each, coordinated by a controller
+  session (being added; see `ROADMAP.md`).
+
+## agent-panel
 
 A live, read-only terminal panel for a Rex pane. It follows a Claude Code session and shows its agents twice:
 
