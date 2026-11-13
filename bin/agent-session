@@ -48,19 +48,31 @@
 #   controller-rules.md  extra rules appended to the controller's prompt
 set -euo pipefail
 
-# The directory this script really lives in (through symlinks), for the shipped docs.
-HARBOR="${BASH_SOURCE[0]}"
-while [[ -L "$HARBOR" ]]; do
-  link="$(readlink "$HARBOR")"
-  [[ "$link" == /* ]] && HARBOR="$link" || HARBOR="$(dirname "$HARBOR")/$link"
+# The directory this script really lives in (through symlinks): bin/ in a clone, the venv's bin/
+# in a `uv tool install`. The helper lib sits next to it either way.
+HERE="${BASH_SOURCE[0]}"
+while [[ -L "$HERE" ]]; do
+  link="$(readlink "$HERE")"
+  [[ "$link" == /* ]] && HERE="$link" || HERE="$(dirname "$HERE")/$link"
 done
-HARBOR="$(cd "$(dirname "$HARBOR")/.." && pwd)"
+HERE="$(cd "$(dirname "$HERE")" && pwd)"
+
+# The shipped default practice doc: package data, in the clone or in the installed venv.
+find_practice_doc() {
+  local f
+  for f in "$HERE"/../agent_panel/assets/controller-practice.md \
+           "$HERE"/../lib/python*/site-packages/agent_panel/assets/controller-practice.md; do
+    [[ -f "$f" ]] && { (cd "$(dirname "$f")" && echo "$PWD/$(basename "$f")"); return 0; }
+  done
+  echo "agent-session: can't find the shipped controller-practice.md" >&2
+  return 1
+}
 
 ROOT="$(git worktree list --porcelain 2>/dev/null | awk 'NR==1 {print $2}' || true)"
 
 PROG=agent-session
 # shellcheck source=agent-session-lib.sh
-source "$HARBOR/bin/agent-session-lib.sh"
+source "$HERE/agent-session-lib.sh"
 
 die() { echo "agent-session: $*" >&2; exit 1; }
 
@@ -107,7 +119,7 @@ load_config() {
   # Rex session labels are global across projects, so prefix ours.
   PREFIX="$(basename "$ROOT")-"
   COPY_FILES=(.env)
-  PRACTICE_DOC="$HARBOR/docs/controller-practice.md"
+  PRACTICE_DOC="$(find_practice_doc)" || exit 1
   [[ -f "$ROOT/ai-ops/local-config/agent-sessions.md" ]] && PRACTICE_DOC="ai-ops/local-config/agent-sessions.md"
   CONTROLLER_MODEL=sonnet
   ADVISOR_MODEL=fable

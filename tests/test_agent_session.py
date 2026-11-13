@@ -252,7 +252,7 @@ def test_controller_models_from_config_and_env(world):
 def test_controller_practice_doc_defaults(world):
     world.session("controller")
     prompt = agent_args(world.rex_call("new"))[-1]
-    assert str(BIN.parent / "docs" / "controller-practice.md") in prompt
+    assert str(BIN.parent / "agent_panel" / "assets" / "controller-practice.md") in prompt
     (world.tmp / "rex.log").unlink()
     local = world.repo / "ai-ops" / "local-config"
     local.mkdir(parents=True)

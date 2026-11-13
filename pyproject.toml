@@ -1,17 +1,24 @@
 [project]
 license = "MIT"
-name = "agent-panel"
+name = "agent-harbor"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = ["textual>=8.2.8", "rich>=15.0.0"]
 
 [project.scripts]
 agent-panel = "agent_panel.cli:main"
 
 [tool.setuptools]
 packages = ["agent_panel"]
+script-files = [
+  "bin/agent-session",
+  "bin/agent-session-lib.sh",
+  "bin/agent-stop-hook",
+  "bin/rexclaude",
+]
 
 [tool.setuptools.package-data]
-agent_panel = ["assets/*.wav"]
+agent_panel = ["assets/*.wav", "assets/*.md"]
 
 [build-system]
 requires = ["setuptools>=68"]

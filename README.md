@@ -4,10 +4,19 @@ Tooling for watching and running Claude Code agents in [Rex](https://www.superlo
 panes. Rex is a terminal app by [Superlogical](https://www.superlogical.com/), currently in public testing
 ([announcement](https://www.superlogical.com/updates/public-testing-beginning)).
 
-**Requires Rex.** Install it first, following the
-[Rex installation guide](https://www.superlogical.com/rex/docs/installation), and make sure the `rex` command is
-on your PATH. `agent-panel` and `agent-session` both open and control Rex panes through it. You'll also need
-Claude Code, Python 3.11+, git and `jq`.
+## Requirements
+
+Developed and tested on macOS. I haven't tested other platforms.
+
+- [Rex](https://www.superlogical.com/rex/docs/installation), a terminal app by
+  [Superlogical](https://www.superlogical.com/) currently in public testing
+  ([announcement](https://www.superlogical.com/updates/public-testing-beginning)). Install it first and make sure the
+  `rex` command is on your PATH: `agent-panel` and `agent-session` open and control Rex panes through it.
+- Claude Code (`claude` on PATH).
+- Python 3.11+, `git` and `jq`.
+- [uv](https://docs.astral.sh/uv/), for the `uv tool install` path below.
+- Optional: `afplay` (built into macOS) plays the cannon sound; where it is missing the sound is silently skipped.
+  `direnv` is optional too.
 
 - **`agent-panel`**: a live, read-only view of a Claude session's agents (below).
 - **`agent-session`**: run parallel agents, one git worktree and Rex session each, coordinated by a controller
@@ -42,14 +51,25 @@ agent-panel only reads transcript files under the Claude config dir. It never wr
 
 ## Install
 
+**To use it:**
+
 ```bash
-./install.sh   # makes .venv, installs, links ~/.local/bin/agent-panel
+uv tool install git+https://github.com/mistcat/agent-harbor
+uv tool upgrade agent-harbor   # later, to update
 ```
 
-Python 3.11 or newer. Dependencies: textual, rich (pytest for tests). `agent-session` also needs `git`, `jq`,
-the `rex` CLI and `claude`.
+This puts `agent-panel`, `agent-session`, `rexclaude` and `agent-stop-hook` on your PATH (via uv's tool bin
+directory; `uv tool update-shell` adds it to your PATH if needed). `agent-session-lib.sh`, the helper the scripts
+source, is linked there too; ignore it.
 
-`install.sh` also links `agent-session`, `rexclaude` and `agent-stop-hook` into `~/.local/bin`.
+**To hack on it:**
+
+```bash
+git clone https://github.com/mistcat/agent-harbor && cd agent-harbor
+./install.sh   # makes .venv, installs editable, links the four commands into ~/.local/bin
+```
+
+Edits to the clone take effect immediately. Dependencies: textual, rich (pytest for tests).
 
 ## Launch beside a Claude session
 
@@ -144,7 +164,7 @@ Reports land in `${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox`
 
 The controller runs on Sonnet with a Fable advisor. Override with `AGENT_SESSION_CONTROLLER_MODEL` and
 `AGENT_SESSION_ADVISOR_MODEL`, or set `CONTROLLER_MODEL` / `ADVISOR_MODEL` in the project config. Its standing
-practice is [docs/controller-practice.md](docs/controller-practice.md).
+practice is [agent_panel/assets/controller-practice.md](agent_panel/assets/controller-practice.md).
 
 ### Per-project config
 
