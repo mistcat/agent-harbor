@@ -108,4 +108,5 @@ def render_tree(agents: list[Agent], width: int, frame: int, advisor_model: str 
     if main and main.advisor_calls:
         out.append_text(_advisor_line(main, advisor_model))
         out.append("\n")
+    out.rstrip()  # no trailing blank line: widget height must equal the line count
     return out
