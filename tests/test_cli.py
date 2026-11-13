@@ -1,0 +1,17 @@
+from pathlib import Path
+
+import pytest
+
+from agent_panel.cli import main, parse_args
+
+
+def test_help_exits_zero():
+    with pytest.raises(SystemExit) as e:
+        main(["--help"])
+    assert e.value.code == 0
+
+
+def test_parses_session_and_cwd():
+    ns = parse_args(["--session", "abc", "--cwd", "/x"])
+    assert ns.session == "abc"
+    assert ns.cwd == Path("/x")
