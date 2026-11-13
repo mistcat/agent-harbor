@@ -201,6 +201,7 @@
 - Create: `README.md` (what it is, read-only promise, install, the `rex split` launch line, `--session`/`--cwd`, the tier and color key)
 - Test: `tests/test_harbor.py`
 
+- [ ] **Step 0 (added 2026-11-13 after tasks 1–4):** Rex split panes don't inherit `CLAUDE_CONFIG_DIR` (seen in the task 4 check), so the panel sat on "waiting". In `session.py`, when `CLAUDE_CONFIG_DIR` is unset, search `~/.claude` and every `~/.claude-*` dir for the project slug and use the one whose newest `*.jsonl` is most recent. An explicit env var still wins. Add a `--config-dir` flag. Tests: `test_config_dir_fallback_picks_newest_profile` and `test_env_config_dir_wins`. Mention it in the README's launch section.
 - [ ] **Step 1:** Write failing `test_children_sail_behind_parent`: a child boat's lane is next to its parent's, and its x trails the parent's on the side opposite the parent's direction, within a small gap.
 - [ ] **Step 2–4:** FAIL → implement (children follow the parent's x with an offset instead of free-sailing) → PASS.
 - [ ] **Step 5:** Run the full suite: `.venv/bin/pytest -q` → all pass. Read-only check: `grep -rnE "open\([^)]*['\"][wa]|write_text|unlink|rmtree|requests|urllib|socket" agent_panel/` → no hits. Do a final by-eye run in Rex during a session that spawns 2+ subagents and calls the advisor.
