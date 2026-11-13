@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Start Claude in a Rex session, with the agent-panel beside it.
+#
+#   rexclaude [prompt...]          in a git repo: open (or switch to) the agent-session controller
+#   rexclaude --solo [prompt...]   a normal working session "<dir>-solo" in the current directory
+#   rexclaude -h | --help
+#
+# Outside a git repo the default behaves like --solo. Both run Claude on
+# $AGENT_SESSION_CONTROLLER_MODEL (default sonnet) with the advisor on
+# $AGENT_SESSION_ADVISOR_MODEL (default fable). The prompt words are appended to the
+# controller's generated prompt, or are the solo session's opening prompt. A solo session
+# that is already open is switched to, not duplicated (its prompt is then ignored).
+# AGENT_SESSION_PANEL=0 skips the panel; a panel problem never fails the launch.
+set -euo pipefail
+
+PROG=rexclaude
+HERE="${BASH_SOURCE[0]}"
+while [[ -L "$HERE" ]]; do
+  link="$(readlink "$HERE")"
+  [[ "$link" == /* ]] && HERE="$link" || HERE="$(dirname "$HERE")/$link"
+done
+HERE="$(cd "$(dirname "$HERE")" && pwd)"
+# shellcheck source=agent-session-lib.sh
+source "$HERE/agent-session-lib.sh"
+
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,3\}//'; }
+
+solo=0
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  --solo) solo=1; shift ;;
+esac
+
+if [[ "$solo" == 0 ]]; then
+  if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    exec "$HERE/agent-session" controller "$@"
+  fi
+  echo "rexclaude: not in a git repo, starting a solo session" >&2
+fi
+
+command -v rex >/dev/null || { echo "rexclaude: rex not found" >&2; exit 1; }
+command -v jq >/dev/null || { echo "rexclaude: jq not found" >&2; exit 1; }
+MODEL="${AGENT_SESSION_CONTROLLER_MODEL:-sonnet}"
+ADVISOR="${AGENT_SESSION_ADVISOR_MODEL:-fable}"
+check_model AGENT_SESSION_CONTROLLER_MODEL "$MODEL"
+check_model AGENT_SESSION_ADVISOR_MODEL "$ADVISOR"
+
+dir="$PWD"
+label="$(basename "$dir")-solo"
+existing="$(rex_session_id "$label")"
+if [[ -n "$existing" ]]; then
+  show_in_app "$existing"
+  echo "Solo session already open in Rex session $existing; switched to it."
+  exit 0
+fi
+
+prompt="$*"
+out="$(rex new "$label" -c "$dir" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$MODEL" \
+  --settings "{\"advisorModel\":\"$ADVISOR\"}" ${prompt:+"$prompt"})"
+sid="$(jq -er '.session_id' <<<"$out")"
+[[ "${AGENT_SESSION_PANEL:-1}" == 0 ]] ||
+  open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$dir"
+show_in_app "$sid"
+echo "Solo session ready in Rex session $sid."

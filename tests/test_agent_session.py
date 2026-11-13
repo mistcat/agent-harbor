@@ -5,6 +5,7 @@ line to rex.log and prints canned JSON, so tests read back exactly what the scri
 """
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -448,3 +449,127 @@ def test_hook_defers_to_a_project_hook(world, tmp_path):
     assert not inbox.exists()
     assert hook(world.env, payload, CLAUDE_PROJECT_DIR=str(tmp_path / "plain"), **vars).returncode == 0
     assert len(list(inbox.iterdir())) == 1
+
+
+# --- rexclaude ---------------------------------------------------------------------------
+
+REXCLAUDE = BIN / "rexclaude"
+
+
+def rexclaude(world, *args, cwd=None):
+    return run([str(REXCLAUDE), *args], cwd or world.repo, world.env)
+
+
+@pytest.fixture
+def plain(world):
+    d = world.tmp / "notrepo"
+    d.mkdir()
+    return d
+
+
+def test_rexclaude_default_in_repo_runs_controller(world):
+    r = rexclaude(world)
+    assert r.returncode == 0, r.stderr
+    new = world.rex_call("new")
+    assert new[1] == "proj-controller"
+    args = agent_args(new)
+    assert args[args.index("--model") + 1] == "sonnet"
+    assert json.loads(args[args.index("--settings") + 1]) == {"advisorModel": "fable"}
+    assert split_call(world) is not None
+
+
+def test_rexclaude_extra_prompt_is_appended_to_controller_prompt(world):
+    assert rexclaude(world, "focus", "on", "billing").returncode == 0
+    prompt = agent_args(world.rex_call("new"))[-1]
+    assert "agent-session inbox --wait" in prompt
+    assert prompt.rstrip().endswith("focus on billing")
+    assert prompt.index("focus on billing") > prompt.index("Call the advisor")
+
+
+def test_rexclaude_solo_creates_labeled_session_with_panel(world):
+    world.env["CLAUDE_CONFIG_DIR"] = "/cfg/acct"
+    r = rexclaude(world, "--solo", "fix", "the", "bug")
+    assert r.returncode == 0, r.stderr
+    new = world.rex_call("new")
+    assert new[1] == "proj-solo" and flag(new, "-c") == str(world.repo)
+    assert flag(new, "--window") == "Agent"
+    args = agent_args(new)
+    assert args[:2] == ["env", "CLAUDE_CONFIG_DIR=/cfg/acct"]
+    assert args[args.index("--model") + 1] == "sonnet"
+    assert json.loads(args[args.index("--settings") + 1]) == {"advisorModel": "fable"}
+    assert args[-1] == "fix the bug"
+    c = split_call(world)
+    assert flag(c, "-b") == "agent-b" and flag(c, "-c") == str(world.repo)
+    assert agent_args(c) == ["agent-panel"]
+
+
+def test_rexclaude_solo_without_prompt_passes_none(world):
+    assert rexclaude(world, "--solo").returncode == 0
+    assert agent_args(world.rex_call("new"))[-1].startswith("{")
+
+
+def test_rexclaude_solo_honors_model_env(world):
+    world.env["AGENT_SESSION_CONTROLLER_MODEL"] = "opus"
+    world.env["AGENT_SESSION_ADVISOR_MODEL"] = "claude-fable-5"
+    assert rexclaude(world, "--solo").returncode == 0
+    args = agent_args(world.rex_call("new"))
+    assert args[args.index("--model") + 1] == "opus"
+    assert json.loads(args[args.index("--settings") + 1]) == {"advisorModel": "claude-fable-5"}
+
+
+def test_rexclaude_outside_repo_falls_back_to_solo_with_note(world, plain):
+    r = rexclaude(world, "hello", cwd=plain)
+    assert r.returncode == 0, r.stderr
+    assert "not in a git repo" in r.stderr
+    new = world.rex_call("new")
+    assert new[1] == "notrepo-solo" and agent_args(new)[-1] == "hello"
+
+
+def test_rexclaude_panel_off_by_env(world):
+    world.env["AGENT_SESSION_PANEL"] = "0"
+    assert rexclaude(world, "--solo").returncode == 0
+    assert split_call(world) is None
+
+
+def test_rexclaude_missing_agent_panel_never_fails(world):
+    fake = world.tmp / "fakebin"
+    bare = world.tmp / "barebin"
+    bare.mkdir()
+    for tool in ("rex", "claude"):
+        (bare / tool).symlink_to(fake / tool)
+    for tool in ("bash", "env", "jq", "git", "basename", "dirname", "readlink", "head", "sed", "cat", "python3"):
+        (bare / tool).symlink_to(shutil.which(tool))
+    world.env["PATH"] = str(bare)
+    r = rexclaude(world, "--solo")
+    assert r.returncode == 0, r.stderr
+    assert "agent-panel not on PATH" in r.stderr and split_call(world) is None
+
+
+def test_rexclaude_open_solo_session_is_switched_to_not_duplicated(world):
+    world.env["FAKE_SESSIONS"] = sessions("proj-solo")
+    r = rexclaude(world, "--solo", "ignored")
+    assert r.returncode == 0, r.stderr
+    assert "switched" in r.stdout
+    assert not [c for c in world.calls() if c[0] == "new"]
+
+
+@pytest.mark.parametrize("var", ["AGENT_SESSION_CONTROLLER_MODEL", "AGENT_SESSION_ADVISOR_MODEL"])
+@pytest.mark.parametrize("args", [("--solo",), ()])
+def test_rexclaude_bad_model_env_refused(world, var, args):
+    world.env[var] = 'x","y'
+    r = rexclaude(world, *args)
+    assert r.returncode != 0 and var in r.stderr
+    assert not [c for c in world.calls() if c[0] == "new"]
+
+
+def test_rexclaude_help(world):
+    r = rexclaude(world, "--help", cwd=world.tmp)
+    assert r.returncode == 0 and "--solo" in r.stdout and "rexclaude" in r.stdout
+
+
+def test_rexclaude_works_through_a_symlink(world):
+    link = world.tmp / "linkbin" / "rexclaude"
+    link.parent.mkdir()
+    link.symlink_to(REXCLAUDE)
+    r = run([str(link), "--solo"], world.repo, world.env)
+    assert r.returncode == 0, r.stderr

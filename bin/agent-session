@@ -6,7 +6,7 @@
 #   agent-session ls
 #   agent-session peek <name> [lines]
 #   agent-session inbox [--wait] [--timeout <seconds>]
-#   agent-session controller
+#   agent-session controller [extra prompt...]
 #   agent-session panel [name]
 #
 # Run it from any git repo. `new` creates ../<repo>-worktrees/<name> (on a new agent/<name>
@@ -58,6 +58,10 @@ HARBOR="$(cd "$(dirname "$HARBOR")/.." && pwd)"
 
 ROOT="$(git worktree list --porcelain 2>/dev/null | awk 'NR==1 {print $2}' || true)"
 
+PROG=agent-session
+# shellcheck source=agent-session-lib.sh
+source "$HARBOR/bin/agent-session-lib.sh"
+
 die() { echo "agent-session: $*" >&2; exit 1; }
 
 usage() { sed -n '4,10p' "$0" | sed 's/^# \{0,3\}//'; exit 1; }
@@ -83,7 +87,7 @@ parse_config() { # parse_config <file>
                   for f in ${COPY_FILES[@]+"${COPY_FILES[@]}"}; do safe_relpath COPY_FILES "$f"; done ;;
       PRACTICE_DOC) safe_relpath PRACTICE_DOC "$val"; PRACTICE_DOC="$val" ;;
       CONTROLLER_MODEL|ADVISOR_MODEL)
-        [[ "$val" =~ ^[][a-z0-9.-]+$ ]] || die "config: $key may only use a-z 0-9 . [ ] -: '$val'"
+        check_model "config: $key" "$val"
         printf -v "$key" '%s' "$val" ;;
       PANEL) [[ "$val" == 0 || "$val" == 1 ]] || die "config: PANEL must be 0 or 1: '$val'"
              PANEL="$val" ;;
@@ -112,6 +116,8 @@ load_config() {
   CONTROLLER="${PREFIX}controller"
   CONTROLLER_MODEL="${AGENT_SESSION_CONTROLLER_MODEL:-$CONTROLLER_MODEL}"
   ADVISOR_MODEL="${AGENT_SESSION_ADVISOR_MODEL:-$ADVISOR_MODEL}"
+  check_model AGENT_SESSION_CONTROLLER_MODEL "$CONTROLLER_MODEL"
+  check_model AGENT_SESSION_ADVISOR_MODEL "$ADVISOR_MODEL"
   PANEL="${AGENT_SESSION_PANEL:-$PANEL}"
   INBOX="${AGENT_SESSION_INBOX:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${PREFIX%-}/inbox}"
   WORKTREES="$(dirname "$ROOT")/$(basename "$ROOT")-worktrees"
@@ -135,29 +141,6 @@ rollback() {
 }
 trap rollback EXIT
 
-rex_session_id() { # rex_session_id <label>
-  rex ls --json | jq -r --arg l "$1" '.sessions[] | select(.label == $l) | .session_id' | head -1
-}
-
-# Open agent-panel in a split beside <block> of <session>, following the checkout <dir>.
-# Best effort: it never returns non-zero, so a panel problem can't fail (or roll back) a command.
-open_panel() { # open_panel <session> <block> <dir>
-  if ! command -v agent-panel >/dev/null; then
-    echo "agent-session: agent-panel not on PATH, skipping the panel" >&2
-    return 0
-  fi
-  if [[ -z "$2" ]]; then
-    echo "agent-session: couldn't find the Agent pane, skipping the panel" >&2
-    return 0
-  fi
-  rex split -s "$1" -b "$2" --split=right --ratio 35 --label Agents --focus=false -c "$3" -- agent-panel >/dev/null ||
-    echo "agent-session: couldn't open the panel (rex split failed)" >&2
-  return 0
-}
-
-# Pass the launching profile through so an agent runs under the same Claude account as
-# whoever started it; Rex panes don't run ~/.zshrc or direnv.
-CLAUDE_ENV=(env CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
 
 preamble() { # preamble <worktree> <branch>
   cat <<EOF
@@ -366,13 +349,8 @@ conflict.
 EOF
 }
 
-show_in_app() { # show_in_app <session> — bring it up in the first connected Rex app, if any
-  local client
-  client="$(rex client ls --json | jq -r '[.clients[] | select(.info.kind == "app" and .connection_state == "connected")][0].client_id // empty')"
-  [[ -n "$client" ]] && rex -C "$client" do session.select session_id="$1" >/dev/null 2>&1 || true
-}
-
-cmd_controller() {
+cmd_controller() { # cmd_controller [extra prompt words...], appended after the generated prompt
+  local extra="$*"
   command -v rex >/dev/null || die "rex not found"
   command -v jq >/dev/null || die "jq not found"
   local existing
@@ -388,7 +366,7 @@ cmd_controller() {
 
   local sid out
   out="$(rex new "$CONTROLLER" -c "$ROOT" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$CONTROLLER_MODEL" \
-    --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)")"
+    --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)${extra:+$'\n\n'$extra}")"
   sid="$(jq -er '.session_id' <<<"$out")"
   rex window new -s "$sid" Shell -c "$ROOT" --focus=false --keep-open --json -- "$SHELL" >/dev/null
   [[ "$PANEL" == 0 ]] || open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$ROOT"

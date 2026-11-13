@@ -12,6 +12,21 @@ Claude Code, Python 3.11+, git and `jq`.
 - **`agent-panel`**: a live, read-only view of a Claude session's agents (below).
 - **`agent-session`**: run parallel agents, one git worktree and Rex session each, coordinated by a controller
   session (below).
+- **`rexclaude`**: start Claude in a Rex session with the panel beside it: the controller in a git repo, or a
+  plain working session (below).
+
+## rexclaude
+
+```bash
+rexclaude [prompt...]         # in a git repo: open (or switch to) the agent-session controller
+rexclaude --solo [prompt...]  # a normal session "<dir>-solo" in the current directory
+```
+
+Both run Claude on `AGENT_SESSION_CONTROLLER_MODEL` (default sonnet) with the advisor on
+`AGENT_SESSION_ADVISOR_MODEL` (default fable), under the same `CLAUDE_CONFIG_DIR`, and open `agent-panel` beside
+it (`AGENT_SESSION_PANEL=0` skips that). In controller mode the prompt words are appended to the controller's
+prompt. Outside a git repo the default is `--solo`, with a note. A solo session that is already open is switched
+to instead of duplicated.
 
 ## agent-panel
 
@@ -34,7 +49,7 @@ agent-panel only reads transcript files under the Claude config dir. It never wr
 Python 3.11 or newer. Dependencies: textual, rich (pytest for tests). `agent-session` also needs `git`, `jq`,
 the `rex` CLI and `claude`.
 
-`install.sh` also links `agent-session` and `agent-stop-hook` into `~/.local/bin`.
+`install.sh` also links `agent-session`, `rexclaude` and `agent-stop-hook` into `~/.local/bin`.
 
 ## Launch beside a Claude session
 

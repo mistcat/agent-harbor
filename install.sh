@@ -19,6 +19,7 @@ mkdir -p "$HOME/.local/bin"
 ln -sf "$REPO/.venv/bin/agent-panel" "$HOME/.local/bin/agent-panel"
 ln -sf "$REPO/bin/agent-session" "$HOME/.local/bin/agent-session"
 ln -sf "$REPO/bin/agent-stop-hook" "$HOME/.local/bin/agent-stop-hook"
+ln -sf "$REPO/bin/rexclaude" "$HOME/.local/bin/rexclaude"
 
 if ! echo ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
   echo ""
