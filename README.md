@@ -1,6 +1,13 @@
 # agent-harbor
 
-Tooling for watching and running Claude Code agents in Rex panes.
+Tooling for watching and running Claude Code agents in [Rex](https://www.superlogical.com/rex/docs/installation)
+panes. Rex is a terminal app by [Superlogical](https://www.superlogical.com/), currently in public testing
+([announcement](https://www.superlogical.com/updates/public-testing-beginning)).
+
+**Requires Rex.** Install it first, following the
+[Rex installation guide](https://www.superlogical.com/rex/docs/installation), and make sure the `rex` command is
+on your PATH. `agent-panel` and `agent-session` both open and control Rex panes through it. You'll also need
+Claude Code, Python 3.11+, git and `jq`.
 
 - **`agent-panel`**: a live, read-only view of a Claude session's agents (below).
 - **`agent-session`**: run parallel agents, one git worktree and Rex session each, coordinated by a controller
