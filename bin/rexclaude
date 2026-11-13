@@ -10,6 +10,8 @@
 # $AGENT_SESSION_ADVISOR_MODEL (default fable). The prompt words are appended to the
 # controller's generated prompt, or are the solo session's opening prompt. A solo session
 # that is already open is switched to, not duplicated (its prompt is then ignored).
+# In a repo that opted in (git config --local agent-session.useProjectScript true), the
+# controller is the repo's own bin/agent-session instead of the shared one.
 # AGENT_SESSION_PANEL=0 skips the panel; a panel problem never fails the launch.
 set -euo pipefail
 
@@ -23,7 +25,7 @@ HERE="$(cd "$(dirname "$HERE")" && pwd)"
 # shellcheck source=agent-session-lib.sh
 source "$HERE/agent-session-lib.sh"
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,3\}//'; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,3\}//'; }
 
 solo=0
 case "${1:-}" in
@@ -33,6 +35,19 @@ esac
 
 if [[ "$solo" == 0 ]]; then
   if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    # A repo with its own bin/agent-session can have rexclaude run that instead, but only if
+    # the user opted in with LOCAL git config (.git/config never comes from a clone, so a
+    # repo can't opt itself in): git config agent-session.useProjectScript true
+    root="$(git worktree list --porcelain 2>/dev/null | awk 'NR==1 {print $2}')"
+    if [[ -n "$root" && "$(git -C "$root" config --local --get agent-session.useProjectScript 2>/dev/null || true)" == true ]]; then
+      script="$root/bin/agent-session"
+      if [[ ! -f "$script" || -L "$script" || ! -x "$script" ]]; then
+        echo "rexclaude: agent-session.useProjectScript is true but $script is not an executable regular file" >&2
+        exit 1
+      fi
+      echo "rexclaude: using this repo's bin/agent-session"
+      exec "$script" controller "$@"
+    fi
     exec "$HERE/agent-session" controller "$@"
   fi
   echo "rexclaude: not in a git repo, starting a solo session" >&2

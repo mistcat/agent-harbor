@@ -573,3 +573,56 @@ def test_rexclaude_works_through_a_symlink(world):
     link.symlink_to(REXCLAUDE)
     r = run([str(link), "--solo"], world.repo, world.env)
     assert r.returncode == 0, r.stderr
+
+
+# --- rexclaude: opt-in to the repo's own bin/agent-session ----------------------------------
+
+def project_script(world, executable=True):
+    d = world.repo / "bin"
+    d.mkdir(exist_ok=True)
+    out = world.tmp / "project-argv.json"
+    script = d / "agent-session"
+    script.write_text(f"#!/usr/bin/env python3\nimport json, sys\nopen({str(out)!r}, 'w').write(json.dumps(sys.argv[1:]))\n")
+    script.chmod(0o755 if executable else 0o644)
+    return out
+
+
+def test_rexclaude_opted_in_repo_uses_project_script(world):
+    out = project_script(world)
+    git(world.repo, "config", "--local", "agent-session.useProjectScript", "true")
+    r = rexclaude(world, "focus", "on", "billing")
+    assert r.returncode == 0, r.stderr
+    assert "rexclaude: using this repo's bin/agent-session" in r.stdout + r.stderr
+    assert json.loads(out.read_text()) == ["controller", "focus", "on", "billing"]
+    assert not world.calls()  # the shared script did not run
+
+
+def test_rexclaude_repo_script_ignored_without_opt_in(world):
+    out = project_script(world)
+    assert rexclaude(world).returncode == 0
+    assert not out.exists()
+    assert world.rex_call("new")[1] == "proj-controller"
+
+
+def test_rexclaude_opt_in_value_must_be_true(world):
+    out = project_script(world)
+    git(world.repo, "config", "--local", "agent-session.useProjectScript", "yes")
+    assert rexclaude(world).returncode == 0
+    assert not out.exists()
+
+
+def test_rexclaude_opted_in_without_executable_script_errors(world):
+    git(world.repo, "config", "--local", "agent-session.useProjectScript", "true")
+    r = rexclaude(world)
+    assert r.returncode != 0
+    assert "bin/agent-session" in r.stderr and "executable" in r.stderr
+    assert not world.calls()
+    project_script(world, executable=False)
+    assert rexclaude(world).returncode != 0
+
+
+def test_rexclaude_solo_ignores_opt_in(world):
+    out = project_script(world)
+    git(world.repo, "config", "--local", "agent-session.useProjectScript", "true")
+    assert rexclaude(world, "--solo").returncode == 0
+    assert not out.exists() and world.rex_call("new")[1] == "proj-solo"

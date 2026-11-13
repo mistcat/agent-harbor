@@ -37,6 +37,19 @@ it (`AGENT_SESSION_PANEL=0` skips that). In controller mode the prompt words are
 prompt. Outside a git repo the default is `--solo`, with a note. A solo session that is already open is switched
 to instead of duplicated.
 
+**Using a repo's own `agent-session`.** If a repo ships its own `bin/agent-session` (say, one that also sets up a
+database per agent), opt that repo in once, in your own checkout:
+
+```bash
+git config agent-session.useProjectScript true   # writes to the repo's local .git/config
+```
+
+From then on, plain `rexclaude [prompt...]` in that repo prints `rexclaude: using this repo's bin/agent-session`
+and runs `<repo>/bin/agent-session controller [prompt...]` instead of the shared script (it errors if that file
+isn't an executable regular file). `--solo` is unaffected. The opt-in is read only from local git config on
+purpose: `.git/config` is never part of a clone, so a repo you clone can't opt itself in and get its script
+run when you type `rexclaude`.
+
 ## agent-panel
 
 A live, read-only terminal panel for a Rex pane. It follows a Claude Code session and shows its agents twice:
