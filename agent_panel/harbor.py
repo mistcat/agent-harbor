@@ -50,7 +50,8 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
     return boats, len(agents) - len(boats)
 
 
-def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int) -> Text:
+def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int,
+                  shots=(), flash: bool = False) -> Text:
     width, height = max(width, 1), max(height, 1)
     grid = [[(" ", "")] * width for _ in range(height)]
     grid[height - 1] = [("~", "dodger_blue3")] * width
@@ -81,6 +82,11 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
             for i, ch in enumerate("zzz"):
                 if 0 <= top - 1 < height - 1 and 0 <= zx + i < width and grid[top - 1][zx + i][0] == " ":
                     grid[top - 1][zx + i] = (ch, "grey50")
+    if shots or flash:
+        from agent_panel.effects import gunport, overlay  # effects imports Boat from here
+
+        main = boats.get("main")
+        overlay(grid, list(shots), gunport(main) if flash and main else None)
     over = len(agents) - len(boats)
     if over > 0:
         label = f"+{over} more"[:width]

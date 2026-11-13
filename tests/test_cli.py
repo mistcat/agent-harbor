@@ -15,3 +15,8 @@ def test_parses_session_and_cwd():
     ns = parse_args(["--session", "abc", "--cwd", "/x"])
     assert ns.session == "abc"
     assert ns.cwd == Path("/x")
+
+
+def test_no_sound_flag():
+    assert parse_args(["--no-sound"]).no_sound is True
+    assert parse_args([]).no_sound is False

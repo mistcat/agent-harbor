@@ -5,9 +5,11 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
+from agent_panel.effects import FLASH_FRAMES, Shot, advance, fire
 from agent_panel.harbor import Boat, layout, render_harbor, step
 from agent_panel.model import Agent
 from agent_panel.session import Snapshot, Watcher
+from agent_panel.sound import Boomer
 from agent_panel.tree import render_tree
 
 POLL_S = 0.5
@@ -26,8 +28,11 @@ class AgentPanelApp(App):
     #harbor { height: 1fr; }
     """
 
-    def __init__(self, watcher: Watcher | None, waiting_dir: Path):
+    def __init__(self, watcher: Watcher | None, waiting_dir: Path, boomer: Boomer | None = None):
         super().__init__()
+        self.boomer = boomer if boomer is not None else Boomer(True)
+        self.shots: list[Shot] = []
+        self.flash = 0
         self.watcher = watcher
         self.waiting_dir = waiting_dir
         self.snapshot: Snapshot | None = None
@@ -51,18 +56,32 @@ class AgentPanelApp(App):
 
     def poll(self) -> None:
         self.snapshot = self.watcher.poll() if self.watcher else None
-        fps = fps_for(self.snapshot.agents) if self.snapshot else 2
+        self.paint()  # first, so the main boat exists to fire from
+        if self.snapshot and self.snapshot.new_shots:
+            self.fire_shots(self.snapshot.new_shots)
+        self.set_fps(10 if self.shots or self.flash else fps_for(self.snapshot.agents) if self.snapshot else 2)
+
+    def set_fps(self, fps: float) -> None:
         if fps != self._fps and self._timer is not None:
             self._fps = fps
             self._timer.stop()
             self._timer = self.set_interval(1 / fps, self.tick)
-        self.paint()
+
+    def fire_shots(self, n: int) -> None:
+        """One shot per new advisor call, one boom in total (the Boomer rate-limits anyway)."""
+        main = self.boats.get("main")
+        if main:
+            self.shots += [fire(main, i) for i in range(n)]
+            self.flash = FLASH_FRAMES
+        self.boomer.boom(time.monotonic())
 
     def tick(self) -> None:
         now = time.monotonic()
         self._dt, self._last_tick = now - self._last_tick, now
         self.frame += 1
+        self.shots = advance(self.shots)
         self.paint()
+        self.flash = max(self.flash - 1, 0)
         self._dt = 0.0
 
     def paint(self) -> None:
@@ -92,7 +111,7 @@ class AgentPanelApp(App):
         width = self.size.width
         self.boats, _ = layout(snap.agents, width, rows, self.boats)
         step(self.boats, snap.agents, self._dt, width)
-        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame))
+        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame, self.shots, self.flash > 0))
 
     def _show(self, widget: Static, text: Text) -> None:
         if self._shown.get(widget.id) != text:

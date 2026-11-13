@@ -9,6 +9,9 @@ agent-panel = "agent_panel.cli:main"
 [tool.setuptools]
 packages = ["agent_panel"]
 
+[tool.setuptools.package-data]
+agent_panel = ["assets/*.wav"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
