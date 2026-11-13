@@ -52,6 +52,9 @@ Write it to a scratch file, then pass it with `--prompt-file`. It should say:
 
 - `agent-session ls`: every worktree, its branch and whether its Rex session is open.
 - `agent-session peek <name> [lines]`: the last lines of that agent's Agent tab.
+- `agent-panel` opens beside the Agent tab of the controller and of each new agent session
+  (`AGENT_SESSION_PANEL=0` turns it off). It shows the Claude session's own subagents, not the
+  other sessions. `agent-session panel [name]` reopens one if it was closed.
 - To send an agent a follow-up (decisions, "rebase now", a new task), write it to a file and
   `rex send` a one-line pointer: "Read and follow <path>". Then `rex send-key ... enter`. Long
   text typed straight into a pane gets cut off in transit.

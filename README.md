@@ -88,7 +88,13 @@ agent-session ls
 agent-session peek <name> [lines]
 agent-session inbox [--wait] [--timeout SECONDS]
 agent-session controller
+agent-session panel [name]
 ```
+
+`new` and `controller` also open `agent-panel` in a split beside the Agent tab's Claude, following that
+checkout. Turn it off with `AGENT_SESSION_PANEL=0` or `PANEL=0` in `.agent-session/config`; if `agent-panel`
+isn't on PATH it is skipped with a note, and a panel problem never fails the command. `agent-session panel`
+opens one by hand beside the controller, or beside agent session `<name>`.
 
 Agents report back through a Claude Code Stop hook. `agent-stop-hook` does nothing unless `agent-session`
 started the Claude, so wire it once in your user-level Claude settings:
@@ -124,7 +130,7 @@ Everything is optional, in `<repo root>/.agent-session/`:
 
 | File | Purpose |
 | --- | --- |
-| `config` | Plain `KEY=value` lines (never executed; unknown keys warn). `PREFIX` (default `<repo dir>-`; lowercase letters, digits, dashes), `COPY_FILES` (space-separated git-ignored files copied into each new worktree, default `.env`; relative paths, no `..`), `PRACTICE_DOC` (default `ai-ops/local-config/agent-sessions.md` if present, else the shipped doc), `CONTROLLER_MODEL`, `ADVISOR_MODEL` |
+| `config` | Plain `KEY=value` lines (never executed; unknown keys warn). `PREFIX` (default `<repo dir>-`; lowercase letters, digits, dashes), `COPY_FILES` (space-separated git-ignored files copied into each new worktree, default `.env`; relative paths, no `..`), `PRACTICE_DOC` (default `ai-ops/local-config/agent-sessions.md` if present, else the shipped doc), `CONTROLLER_MODEL`, `ADVISOR_MODEL`, `PANEL` (`0` or `1`, default `1`: open the panel) |
 | `agent-rules.md` | Bullets inserted into every agent's preamble (live-write rules, the project's test commands) |
 | `controller-rules.md` | Text added to the controller's prompt |
 

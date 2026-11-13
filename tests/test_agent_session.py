@@ -20,9 +20,18 @@ with open(os.environ["REX_LOG"], "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 a = sys.argv[1:]
 if a[:1] == ["new"] or a[:2] == ["window", "new"]:
-    print(json.dumps({"session_id": "sess-1", "block_ids": ["b1"]}))
+    print(json.dumps({"session_id": "sess-1", "block_ids": ["b1"],
+                      "initial_windows": [{"window_id": "w1", "block_ids": ["agent-b"]}]}))
+elif a[:1] == ["split"]:
+    print(json.dumps({"block_ids": ["panel-b"]}))
+elif a[:2] == ["window", "ls"]:
+    sid = a[a.index("-s") + 1]
+    def win(label, block):
+        return {"window_id": "w-" + label, "label": label,
+                "layers": [{"blocks": [{"block_id": block}]}]}
+    print(json.dumps({"session_id": sid, "windows": [win("Tests", "tests-" + sid), win("Agent", "agentblock-" + sid)]}))
 elif a[:2] == ["ls", "--json"]:
-    print(json.dumps({"sessions": []}))
+    print(os.environ.get("FAKE_SESSIONS", json.dumps({"sessions": []})))
 elif a[:3] == ["client", "ls", "--json"]:
     print(json.dumps({"clients": []}))
 """
@@ -250,6 +259,133 @@ def test_controller_practice_doc_defaults(world):
     world.session("controller")
     prompt = agent_args(world.rex_call("new"))[-1]
     assert "ai-ops/local-config/agent-sessions.md" in prompt
+
+
+def split_call(world):
+    return next((c for c in world.calls() if c[0] == "split"), None)
+
+
+def flag(call, name):
+    return call[call.index(name) + 1]
+
+
+def test_new_opens_panel_beside_agent_pane_in_worktree(world):
+    r = world.session("new", "alpha")
+    assert r.returncode == 0, r.stderr
+    c = split_call(world)
+    assert c is not None
+    wt = str(world.tmp / "proj-worktrees" / "alpha")
+    assert flag(c, "-s") == "sess-1" and flag(c, "-b") == "agent-b"
+    assert flag(c, "-c") == wt
+    assert "--focus=false" in c and "--split=right" in c
+    assert flag(c, "--ratio") == "35" and flag(c, "--label") == "Agents"
+    assert agent_args(c) == ["agent-panel"]
+
+
+def test_controller_opens_panel_in_main_checkout(world):
+    r = world.session("controller")
+    assert r.returncode == 0, r.stderr
+    c = split_call(world)
+    assert flag(c, "-c") == str(world.repo) and flag(c, "-b") == "agent-b"
+    assert agent_args(c) == ["agent-panel"]
+
+
+@pytest.mark.parametrize("cmd", [("new", "alpha"), ("controller",)])
+def test_panel_off_by_config_or_env(world, cmd):
+    world.config("config", "PANEL=0\n")
+    assert world.session(*cmd).returncode == 0
+    assert split_call(world) is None
+    (world.tmp / "rex.log").unlink()
+    (world.repo / ".agent-session" / "config").unlink()
+    world.env["AGENT_SESSION_PANEL"] = "0"
+    if cmd[0] == "new":
+        git(world.repo, "worktree", "remove", "--force", str(world.tmp / "proj-worktrees" / "alpha"))
+        git(world.repo, "branch", "-D", "agent/alpha")
+    assert world.session(*cmd).returncode == 0
+    assert split_call(world) is None
+
+
+def test_env_panel_overrides_config(world):
+    world.config("config", "PANEL=0\n")
+    world.env["AGENT_SESSION_PANEL"] = "1"
+    world.session("controller")
+    assert split_call(world) is not None
+
+
+def test_panel_config_value_must_be_0_or_1(world):
+    world.config("config", "PANEL=yes\n")
+    r = world.session("controller")
+    assert r.returncode != 0 and "PANEL" in r.stderr
+
+
+@pytest.mark.parametrize("cmd", [("new", "alpha"), ("controller",)])
+def test_missing_agent_panel_skips_with_note(world, cmd):
+    # PATH with only the fakes' dir plus system tools, no agent-panel
+    fake = world.tmp / "fakebin"
+    bare = world.tmp / "barebin"
+    bare.mkdir()
+    for n in ("rex", "claude"):
+        (bare / n).symlink_to(fake / n)
+    for n in ("git", "jq", "env", "bash", "dirname", "basename", "readlink", "awk", "sed", "cat",
+              "mkdir", "cp", "head", "sort", "cut", "tail", "python3"):
+        w = subprocess.run(["bash", "-c", f"command -v {n}"], capture_output=True, text=True, env=world.env).stdout.strip()
+        if w:
+            (bare / n).symlink_to(w)
+    world.env["PATH"] = str(bare)
+    r = world.session(*cmd)
+    assert r.returncode == 0, r.stderr
+    assert "agent-panel" in r.stderr
+    assert split_call(world) is None
+
+
+def test_failed_split_never_fails_the_command(world):
+    fake = world.tmp / "fakebin"
+    (fake / "rex").write_text((fake / "rex").read_text().replace(
+        'elif a[:1] == ["split"]:', 'elif a[:1] == ["split"]:\n    sys.exit(1)\nelif False:'))
+    r = world.session("new", "alpha")
+    assert r.returncode == 0, r.stderr
+    assert (world.tmp / "proj-worktrees" / "alpha").exists()
+    assert "panel" in r.stderr
+
+
+def sessions(*labels):
+    return json.dumps({"sessions": [{"session_id": f"sid-{l}", "label": l} for l in labels]})
+
+
+def test_panel_command_targets_controller_by_default(world):
+    world.env["FAKE_SESSIONS"] = sessions("proj-controller", "proj-alpha")
+    r = world.session("panel")
+    assert r.returncode == 0, r.stderr
+    c = split_call(world)
+    assert flag(c, "-s") == "sid-proj-controller"
+    assert flag(c, "-b") == "agentblock-sid-proj-controller"
+    assert flag(c, "-c") == str(world.repo)
+    assert agent_args(c) == ["agent-panel"]
+
+
+def test_panel_command_targets_named_agent_worktree(world):
+    world.env["FAKE_SESSIONS"] = sessions("proj-controller", "proj-alpha")
+    (world.tmp / "proj-worktrees" / "alpha").mkdir(parents=True)
+    r = world.session("panel", "alpha")
+    assert r.returncode == 0, r.stderr
+    c = split_call(world)
+    assert flag(c, "-s") == "sid-proj-alpha" and flag(c, "-b") == "agentblock-sid-proj-alpha"
+    assert flag(c, "-c") == str(world.tmp / "proj-worktrees" / "alpha")
+
+
+def test_panel_command_ignores_panel_off_and_dies_when_not_open(world):
+    world.env["AGENT_SESSION_PANEL"] = "0"
+    r = world.session("panel")
+    assert r.returncode != 0 and "proj-controller" in r.stderr
+    assert split_call(world) is None
+    world.env["FAKE_SESSIONS"] = sessions("proj-controller")
+    assert world.session("panel").returncode == 0
+    assert split_call(world) is not None
+
+
+def test_usage_lists_panel(world, tmp_path):
+    r = run([str(SESSION)], tmp_path, world.env)
+    assert "agent-session panel" in r.stderr + r.stdout
 
 
 def test_done_removes_merged_worktree_and_branch(world):

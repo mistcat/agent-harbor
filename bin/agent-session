@@ -7,6 +7,7 @@
 #   agent-session peek <name> [lines]
 #   agent-session inbox [--wait] [--timeout <seconds>]
 #   agent-session controller
+#   agent-session panel [name]
 #
 # Run it from any git repo. `new` creates ../<repo>-worktrees/<name> (on a new agent/<name>
 # branch off origin/<base>, or on an existing branch), copies the git-ignored files a worktree
@@ -33,9 +34,16 @@
 # $AGENT_SESSION_CONTROLLER_MODEL (default sonnet) with the advisor on
 # $AGENT_SESSION_ADVISOR_MODEL (default fable), so its judgment calls get a stronger model.
 #
+# `new` and `controller` also open `agent-panel` in a split beside the Agent tab's Claude
+# (35% wide, not focused, following the checkout it was started for). AGENT_SESSION_PANEL=0 or
+# PANEL=0 in the config turns that off; if agent-panel isn't on PATH it is skipped with a note,
+# and a panel failure never fails the command. `panel` opens one by hand, beside the controller
+# or beside agent session <name>.
+#
 # Optional per-project config in <repo>/.agent-session/:
 #   config               KEY=value lines (never sourced): PREFIX, COPY_FILES (space-separated),
-#                        PRACTICE_DOC, CONTROLLER_MODEL, ADVISOR_MODEL
+#                        PRACTICE_DOC, CONTROLLER_MODEL, ADVISOR_MODEL,
+#                        PANEL (0 or 1)
 #   agent-rules.md       extra rules inserted into every agent's preamble
 #   controller-rules.md  extra rules appended to the controller's prompt
 set -euo pipefail
@@ -52,7 +60,7 @@ ROOT="$(git worktree list --porcelain 2>/dev/null | awk 'NR==1 {print $2}' || tr
 
 die() { echo "agent-session: $*" >&2; exit 1; }
 
-usage() { sed -n '4,9p' "$0" | sed 's/^# \{0,3\}//'; exit 1; }
+usage() { sed -n '4,10p' "$0" | sed 's/^# \{0,3\}//'; exit 1; }
 
 valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,40}$ ]] || die "name must be lowercase letters, digits and dashes: '$1'"; }
 
@@ -77,6 +85,8 @@ parse_config() { # parse_config <file>
       CONTROLLER_MODEL|ADVISOR_MODEL)
         [[ "$val" =~ ^[][a-z0-9.-]+$ ]] || die "config: $key may only use a-z 0-9 . [ ] -: '$val'"
         printf -v "$key" '%s' "$val" ;;
+      PANEL) [[ "$val" == 0 || "$val" == 1 ]] || die "config: PANEL must be 0 or 1: '$val'"
+             PANEL="$val" ;;
       *) echo "agent-session: ignoring unknown config key '$key' in $1" >&2 ;;
     esac
   done <"$1"
@@ -97,10 +107,12 @@ load_config() {
   [[ -f "$ROOT/ai-ops/local-config/agent-sessions.md" ]] && PRACTICE_DOC="ai-ops/local-config/agent-sessions.md"
   CONTROLLER_MODEL=sonnet
   ADVISOR_MODEL=fable
+  PANEL=1
   parse_config "$CONFIG_DIR/config"
   CONTROLLER="${PREFIX}controller"
   CONTROLLER_MODEL="${AGENT_SESSION_CONTROLLER_MODEL:-$CONTROLLER_MODEL}"
   ADVISOR_MODEL="${AGENT_SESSION_ADVISOR_MODEL:-$ADVISOR_MODEL}"
+  PANEL="${AGENT_SESSION_PANEL:-$PANEL}"
   INBOX="${AGENT_SESSION_INBOX:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${PREFIX%-}/inbox}"
   WORKTREES="$(dirname "$ROOT")/$(basename "$ROOT")-worktrees"
   BASE="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
@@ -125,6 +137,22 @@ trap rollback EXIT
 
 rex_session_id() { # rex_session_id <label>
   rex ls --json | jq -r --arg l "$1" '.sessions[] | select(.label == $l) | .session_id' | head -1
+}
+
+# Open agent-panel in a split beside <block> of <session>, following the checkout <dir>.
+# Best effort: it never returns non-zero, so a panel problem can't fail (or roll back) a command.
+open_panel() { # open_panel <session> <block> <dir>
+  if ! command -v agent-panel >/dev/null; then
+    echo "agent-session: agent-panel not on PATH, skipping the panel" >&2
+    return 0
+  fi
+  if [[ -z "$2" ]]; then
+    echo "agent-session: couldn't find the Agent pane, skipping the panel" >&2
+    return 0
+  fi
+  rex split -s "$1" -b "$2" --split=right --ratio 35 --label Agents --focus=false -c "$3" -- agent-panel >/dev/null ||
+    echo "agent-session: couldn't open the panel (rex split failed)" >&2
+  return 0
 }
 
 # Pass the launching profile through so an agent runs under the same Claude account as
@@ -196,16 +224,18 @@ cmd_new() {
   command -v direnv >/dev/null && direnv allow "$wt" >/dev/null 2>&1 || true
 
   echo "== Opening Rex session '$PREFIX$name'"
-  local sid
+  local sid out
   local agent=("${CLAUDE_ENV[@]}" AGENT_SESSION_NAME="$name" AGENT_SESSION_INBOX="$INBOX" claude)
   if [[ -n "$prompt" ]]; then
-    sid="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}" "$(preamble "$wt" "$branch")
-$prompt" | jq -er '.session_id')"
+    out="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}" "$(preamble "$wt" "$branch")
+$prompt")"
   else
-    sid="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}" | jq -er '.session_id')"
+    out="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}")"
   fi
+  sid="$(jq -er '.session_id' <<<"$out")"
   ROLLBACK_SID="$sid"
   rex window new -s "$sid" Tests -c "$wt" --focus=false --keep-open --json -- "$SHELL" >/dev/null
+  [[ "$PANEL" == 0 ]] || open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$wt"
 
   cat <<EOF
 
@@ -356,13 +386,34 @@ cmd_controller() {
   current="$(git -C "$ROOT" branch --show-current)"
   [[ "$current" == "$BASE" ]] || echo "warning: the main checkout is on '$current', not $BASE" >&2
 
-  local sid
-  sid="$(rex new "$CONTROLLER" -c "$ROOT" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$CONTROLLER_MODEL" \
-    --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)" |
-    jq -er '.session_id')"
+  local sid out
+  out="$(rex new "$CONTROLLER" -c "$ROOT" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$CONTROLLER_MODEL" \
+    --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)")"
+  sid="$(jq -er '.session_id' <<<"$out")"
   rex window new -s "$sid" Shell -c "$ROOT" --focus=false --keep-open --json -- "$SHELL" >/dev/null
+  [[ "$PANEL" == 0 ]] || open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$ROOT"
   show_in_app "$sid"
   echo "Controller ready in Rex session $sid (tabs: Agent, Shell)."
+}
+
+# Open the panel by hand beside the controller (no name) or agent session <name>.
+cmd_panel() {
+  local name="${1:-}" label="$CONTROLLER" dir="$ROOT" sid block
+  if [[ -n "$name" ]]; then
+    valid_name "$name"
+    label="$PREFIX$name"; dir="$WORKTREES/$name"
+    [[ -d "$dir" ]] || die "no worktree at $dir"
+  fi
+  command -v rex >/dev/null || die "rex not found"
+  command -v jq >/dev/null || die "jq not found"
+  command -v agent-panel >/dev/null || die "agent-panel not on PATH"
+  sid="$(rex_session_id "$label")"
+  [[ -n "$sid" ]] || die "no Rex session named '$label' is open"
+  block="$(rex window ls -s "$sid" --json | jq -r '[.windows[] | select(.label == "Agent") | .layers[].blocks[]?.block_id][0] // empty')"
+  [[ -n "$block" ]] || die "no Agent tab in Rex session '$label'"
+  rex split -s "$sid" -b "$block" --split=right --ratio 35 --label Agents --focus=false -c "$dir" -- agent-panel >/dev/null ||
+    die "rex split failed"
+  echo "Panel opened beside the Agent tab of '$label'."
 }
 
 # Subcommands need a repo; usage doesn't.
@@ -375,5 +426,6 @@ case "${1:-}" in
   peek) shift; repo_cmd cmd_peek "$@" ;;
   inbox) shift; repo_cmd cmd_inbox "$@" ;;
   controller) shift; repo_cmd cmd_controller "$@" ;;
+  panel) shift; repo_cmd cmd_panel "$@" ;;
   *) usage ;;
 esac

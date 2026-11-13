@@ -1,7 +1,6 @@
 # Roadmap
 
-1. **`agent-session panel` command.** Open `agent-panel` in a Rex split beside the controller (or beside a
-   named agent session) with one command, instead of the long `rex split ... -- agent-panel` line.
+Nothing queued. See Later.
 
 ## Later
 
