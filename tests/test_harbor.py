@@ -18,7 +18,7 @@ def agents(n, burn=1000):
 def test_tier_thresholds():
     assert tier(0) == "rowboat"
     assert tier(TIER_SLOOP) == "sloop" == tier(50_000)
-    assert tier(TIER_GALLEON) == "galleon" == tier(500_000)
+    assert tier(TIER_GALLEON) == "galleon" == tier(300_000)
     assert tier(TIER_SLOOP - 1) == "rowboat"
 
 

@@ -2,7 +2,7 @@
 from typing import Literal
 
 TIER_SLOOP = 50_000
-TIER_GALLEON = 500_000  # adjust by eye
+TIER_GALLEON = 300_000  # main sessions pass this quickly, so the flagship looks it
 
 SAIL = "▲"
 
