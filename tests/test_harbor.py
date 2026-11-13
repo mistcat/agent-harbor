@@ -96,9 +96,9 @@ def test_harbor_fills_its_box_exactly(tmp_path):
 def test_first_boats_sit_on_the_waterline_lane():
     ags = agents(2)
     boats, _ = layout(ags, 50, 30, {})
-    assert {b.lane for b in boats.values()} == {0}
+    assert boats["main"].lane == 0 and boats["a1"].lane <= 1  # a child may sail one lane above its parent
     lines = render_harbor(ags, boats, 50, 30, 0).plain.split("\n")
-    assert "\\" in lines[-2] and set(lines[-1]) == {"~"}
+    assert any("\\" in l for l in lines[-3:-1]) and set(lines[-1]) == {"~"}  # hull rests on the water (bob moves it a row)
 
 
 # ---- Task 6: motion, wake, anchored zzz, frame rate ----
@@ -180,9 +180,61 @@ def test_boats_stay_on_the_water_when_pane_grows():
     boats, _ = layout(ags, 50, 12, {})
     boats, _ = layout(ags, 50, 30, boats)
     lines = render_harbor(ags, boats, 50, 30, 0).plain.split("\n")
-    assert "\\" in lines[-2]
+    assert any("\\" in l for l in lines[-3:-1])
 
 
 def test_fps_for():
     assert fps_for(sailing()) == 10
     assert fps_for([ag("d", None, 0, "x", status="done"), ag("i", None, 0, "x", status="idle")]) == 2
+
+
+# ---- Task 8: flotillas ----
+from agent_panel.harbor import SLOT_W
+
+
+def fleet(child_status="running", parent_status="running"):
+    return [ag("main", None, 0, "main", "opus 5.5", burn=1, status=parent_status),
+            ag("a1", "main", 1, "kid", burn=1, status=child_status)]
+
+
+def sail(ags, boats, seconds, width=80, dt=0.1):
+    for _ in range(int(seconds / dt)):
+        step(boats, ags, dt, width)
+
+
+def test_children_sail_behind_parent():
+    ags = fleet()
+    for direction in (1, -1):
+        boats, _ = layout(ags, 80, 20, {})
+        boats["main"].x, boats["main"].direction = 40.0, direction
+        sail(ags, boats, 4.0)
+        p, c = boats["main"], boats["a1"]
+        assert abs(p.lane - c.lane) <= 1
+        trail = (p.x - c.x) * direction  # positive = child is on the side opposite the parent's heading
+        assert 0 < trail <= 2 * SLOT_W
+        assert c.direction == p.direction
+
+
+def test_second_child_trails_further_behind():
+    ags = fleet() + [ag("a2", "main", 1, "kid2", burn=1)]
+    boats, _ = layout(ags, 120, 20, {})
+    boats["main"].x, boats["main"].direction = 60.0, 1
+    sail(ags, boats, 4.0, width=120)
+    assert boats["main"].x > boats["a1"].x > boats["a2"].x
+
+
+def test_parent_sails_while_a_child_runs_even_if_main_is_idle():
+    ags = fleet(child_status="running", parent_status="idle")
+    boats, _ = layout(ags, 80, 20, {})
+    x0 = boats["main"].x
+    sail(ags, boats, 1.0)
+    assert boats["main"].x != x0
+    assert "zzz" not in render_harbor(ags, boats, 80, 10, 0).plain
+
+
+def test_done_child_stays_anchored_when_parent_sails():
+    ags = fleet(child_status="done")
+    boats, _ = layout(ags, 80, 20, {})
+    x = boats["a1"].x
+    sail(ags, boats, 2.0)
+    assert boats["a1"].x == x

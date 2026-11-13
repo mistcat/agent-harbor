@@ -22,6 +22,19 @@ class Boat:
     tier: str
 
 
+def active_ids(agents: list[Agent]) -> set[str]:
+    """Agents that sail: running ones, and any ancestor of a running one (a parent leads its flotilla)."""
+    by_id = {a.id: a for a in agents}
+    active: set[str] = set()
+    for a in agents:
+        if a.status == "running":
+            cur = a
+            while cur is not None and cur.id not in active:
+                active.add(cur.id)
+                cur = by_id.get(cur.parent_id) if cur.parent_id else None
+    return active
+
+
 def _lanes(width: int, height: int) -> tuple[int, int]:
     return max(0, (height - 1) // LANE_H), max(0, width // SLOT_W)
 
@@ -41,7 +54,12 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         if a.id in boats:
             continue
         t = tier(a.burn)
-        for lane in range(lanes):  # lane 0 is the waterline lane; fill it first
+        order = list(range(lanes))  # lane 0 is the waterline lane; fill it first
+        parent = boats.get(a.parent_id) if a.parent_id else None
+        if parent:  # a child sails in the lane above its parent when there is one
+            pref = parent.lane + 1 if parent.lane + 1 < lanes else parent.lane
+            order = [pref] + [l for l in order if l != pref]
+        for lane in order:
             slot = next((s for s in range(per_lane)
                          if all(b.lane != lane or abs(b.x - s * SLOT_W) >= SLOT_W for b in boats.values())), None)
             if slot is not None:
@@ -56,6 +74,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
     grid = [[(" ", "")] * width for _ in range(height)]
     grid[height - 1] = [("~", "dodger_blue3")] * width
     by_id = {a.id: a for a in agents}
+    active = active_ids(agents)
     for b in boats.values():
         a = by_id.get(b.agent_id)
         if a is None:
@@ -72,7 +91,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
                 if ch != " " and 0 <= y < height - 1 and 0 <= x < width:
                     grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "grey70")
         hull_y = top + len(sprite) - 1
-        if a.status == "running":
+        if a.id in active:
             for i, ch in enumerate(WAKE):
                 x = x0 - 1 - i if b.direction == 1 else x0 + len(sprite[0]) + i
                 if 0 <= x < width and 0 <= hull_y < height - 1 and grid[hull_y][x][0] == " ":
@@ -102,13 +121,22 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
 
 
 def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> None:
-    """Move running boats and turn them at the edges. Done and idle boats stay put."""
-    by_id = {a.id: a for a in agents}
-    for b in boats.values():
-        a = by_id.get(b.agent_id)
-        if a is None or a.status != "running":
+    """Move sailing boats; running children follow their parent. Done and idle boats stay put."""
+    active = active_ids(agents)
+    followers: dict[str, int] = {}
+    for a in agents:  # parents come before their children
+        b = boats.get(a.id)
+        if b is None or a.id not in active:
             continue
         w = sprite_width(sprite_key(b.agent_id, b.tier))
+        parent = boats.get(a.parent_id) if a.parent_id else None
+        if parent and a.parent_id in active:
+            k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
+            target = parent.x - parent.direction * SLOT_W * k
+            b.direction = parent.direction
+            b.x += (target - b.x) * min(1.0, 4 * dt)
+            b.x = min(max(b.x, 0.0), float(max(width - w, 0)))
+            continue
         b.x += b.direction * SPEED * dt
         if b.x > width - w:
             b.x, b.direction = float(max(width - w, 0)), -1
