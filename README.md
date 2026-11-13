@@ -128,3 +128,7 @@ Everything is optional, in `<repo root>/.agent-session/`:
 
 `examples/crm/.agent-session/` is a worked example. The base branch is detected from `origin/HEAD`, falling back
 to `master`.
+
+## License
+
+MIT. See `LICENSE`.

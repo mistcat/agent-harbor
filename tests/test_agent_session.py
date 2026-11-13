@@ -296,3 +296,19 @@ def test_hook_writes_report_only_when_both_vars_set(world, tmp_path):
     assert report.name.startswith("a-")
     text = report.read_text()
     assert "agent: a" in text and "all done" in text
+
+
+def test_hook_defers_to_a_project_hook(world, tmp_path):
+    """A project that wires its own bin/agent-stop-hook gets one report, not two."""
+    inbox = tmp_path / "hookbox"
+    proj = tmp_path / "proj-with-hook"
+    (proj / "bin").mkdir(parents=True)
+    own = proj / "bin" / "agent-stop-hook"
+    own.write_text("#!/usr/bin/env bash\nexit 0\n")
+    own.chmod(0o755)
+    payload = json.dumps({"last_assistant_message": "x"})
+    vars = dict(AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
+    assert hook(world.env, payload, CLAUDE_PROJECT_DIR=str(proj), **vars).returncode == 0
+    assert not inbox.exists()
+    assert hook(world.env, payload, CLAUDE_PROJECT_DIR=str(tmp_path / "plain"), **vars).returncode == 0
+    assert len(list(inbox.iterdir())) == 1

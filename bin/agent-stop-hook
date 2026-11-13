@@ -12,6 +12,10 @@
 # a turn another Stop hook continued, and skipping would lose that report.
 
 [[ -n "${AGENT_SESSION_NAME:-}" && -n "${AGENT_SESSION_INBOX:-}" ]] || exit 0
+# A project that wires its own copy (e.g. bin/agent-stop-hook from before this repo existed)
+# already reports; firing here too would double every report.
+own="${CLAUDE_PROJECT_DIR:-}/bin/agent-stop-hook"
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -x "$own" && ! "$own" -ef "${BASH_SOURCE[0]}" ]]; then exit 0; fi
 
 {
   input="$(cat)"
