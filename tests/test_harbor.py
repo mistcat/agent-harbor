@@ -22,10 +22,30 @@ def test_tier_thresholds():
     assert tier(TIER_SLOOP - 1) == "rowboat"
 
 
-def test_sprites_are_rectangles_of_3_to_5_lines():
-    assert set(SPRITES) == {"rowboat", "sloop", "galleon"}
+def test_sprites_are_rectangles_of_3_to_6_lines():
+    assert set(SPRITES) == {"rowboat", "sloop", "galleon"} | {"main_rowboat", "main_sloop", "main_galleon"}
     for lines in SPRITES.values():
-        assert 3 <= len(lines) <= 5 and len({len(l) for l in lines}) == 1
+        assert 3 <= len(lines) <= 6 and len({len(l) for l in lines}) == 1
+
+
+def test_galleon_is_one_tall_sail_no_wider_than_before():
+    g = SPRITES["galleon"]
+    assert len(g[0]) <= 9 and len(g) > len(SPRITES["sloop"]) and len(g[0]) >= len(SPRITES["sloop"][0])
+
+
+def test_skull_is_one_cell_wide():
+    from rich.cells import cell_len
+    assert cell_len("☠") == 1
+    from agent_panel.harbor import SKULL
+    assert SKULL == "☠"
+
+
+def test_main_stern_deck_is_clear_for_the_captain():
+    from agent_panel.boats import STERN_W
+    for t in ("rowboat", "sloop", "galleon"):
+        lines = SPRITES["main_" + t]
+        assert all(l[:STERN_W + 1].strip() == "" for l in lines[:-1])  # nothing above the stern hull
+        assert len(lines[0]) == len(SPRITES[t][0]) + STERN_W + 1
 
 
 def test_layout_gives_every_agent_a_boat_when_room():
@@ -124,7 +144,7 @@ def test_running_boat_moves_done_boat_stays():
 def test_boat_turns_at_edge():
     ags = sailing()
     boats, _ = layout(ags, 40, 10, {})
-    w = len(SPRITES["rowboat"][0])
+    w = len(SPRITES["main_rowboat"][0])
     boats["main"].x, boats["main"].direction = 36.0, 1
     step(boats, ags, 1.0, 40)
     assert boats["main"].direction == -1 and boats["main"].x <= 40 - w
@@ -140,7 +160,7 @@ def hull_line(boats, ags, frame=0, width=60):
 
 def test_wake_behind_moving_boat():
     ags = sailing()
-    w = len(SPRITES["rowboat"][0])
+    w = len(SPRITES["main_rowboat"][0])
     for direction in (1, -1):
         boats, _ = layout(ags, 60, 10, {})
         boats["main"].x, boats["main"].direction = 30.0, direction
@@ -241,10 +261,12 @@ def test_done_child_stays_anchored_when_parent_sails():
 
 
 def overlapping_pairs(boats):
-    w = len(SPRITES["rowboat"][0])
+    from agent_panel.boats import sprite_key, sprite_width
+    wid = {k: sprite_width(sprite_key(k, b.tier)) for k, b in boats.items()}
     ids = sorted(boats)
     return [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
-            if boats[a].lane == boats[b].lane and abs(boats[a].x - boats[b].x) < w]
+            if boats[a].lane == boats[b].lane
+            and boats[a].x < boats[b].x + wid[b] and boats[b].x < boats[a].x + wid[a]]
 
 
 def test_flotilla_does_not_pile_up_at_the_edges():
@@ -298,7 +320,7 @@ def test_captain_only_above_the_main_boat():
     pos = captain_positions(t, 70)
     assert pos
     m = boats["main"]
-    w = len(SPRITES["rowboat"][0])
+    w = len(SPRITES["main_rowboat"][0])
     assert all(m.x <= x < m.x + w for _, x in pos)
     t2 = render_harbor(ags, boats, 70, 20, 0, captain=False)
     assert not captain_positions(t2, 70)
@@ -326,6 +348,7 @@ def test_captain_stays_in_the_water_box_and_leaves_subagents_alone():
 def test_firing_shows_call_out_and_commanding_differs_from_idle():
     ags = [ag("main", None, 0, "main", status="running"), ag("a1", "main", 1, "t", status="running")]
     boats, _ = layout(ags, 60, 14, {})
+    boats["a1"].x = 30.0
     plain = lambda **kw: render_harbor(ags, boats, 60, 14, 0, **kw).plain
     assert "Fire!" in plain(flash=True) and "Fire!" not in plain()
     idle_ags = [ag("main", None, 0, "main", status="running")]
@@ -351,3 +374,26 @@ def test_narrow_and_tiny_harbors_do_not_raise():
 def test_no_captain_flag():
     assert parse_args([]).no_captain is False
     assert parse_args(["--no-captain"]).no_captain is True
+
+
+def test_captain_never_overlaps_sail_or_hull_art():
+    for burn in (1, 60_000, 900_000):
+        for d in (1, -1):
+            for flash in (False, True):
+                ags = [ag("main", None, 0, "main", burn=burn, status="running")]
+                boats, _ = layout(ags, 60, 14, {})
+                boats["main"].x, boats["main"].direction = 20.0, d
+                bare = render_harbor(ags, boats, 60, 14, 0, captain=False).plain.split("\n")
+                full = render_harbor(ags, boats, 60, 14, 0, flash=flash).plain.split("\n")
+                for yb, yf in zip(bare, full):
+                    for cb, cf in zip(yb, yf):
+                        if cb != cf:
+                            assert cb == " "  # the captain (and call-out) only ever fill blank cells
+
+
+def test_hat_is_a_tricorn_with_a_skull_in_gold():
+    ags = [ag("main", None, 0, "main", status="running")]
+    boats, _ = layout(ags, 60, 14, {})
+    t = render_harbor(ags, boats, 60, 14, 0)
+    assert "▄▄▄" in t.plain and "▀▀☠▀▀" in t.plain
+    assert len(captain_positions(t, 60)) >= 5

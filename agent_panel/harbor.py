@@ -1,26 +1,29 @@
 """Pure harbor layout and rendering: agents -> boats -> Rich Text."""
 from dataclasses import dataclass
 
+from rich.cells import cell_len
 from rich.text import Text
 
-from agent_panel.boats import SAIL, SPRITES, sprite_key, sprite_width, tier
+from agent_panel.boats import SAIL, SPRITES, STERN_W, mirror, sprite_key, sprite_width, tier
 from agent_panel.colors import model_color
 from agent_panel.model import Agent
 
 SPEED = 6.0  # cells per second for a running boat
 WAKE = "~-."  # nearest to farthest behind the hull
-LANE_H = 5  # tallest sprite
+LANE_H = 6  # tallest sprite
 SLOT_W = 10  # widest sprite plus a gap
 CAPTAIN_COLOR = "gold1"  # not used by any model family
-CAPTAIN_W = 3
+CAPTAIN_W = STERN_W
+SKULL = "☠" if cell_len("☠") == 1 else "x"
 CALL_OUT = "Fire!"
-# Captain frames facing right (flotilla astern, on the left); mirrored when sailing left. Rows: hat, head+arms, body.
+# Captain facing right (stern on the left, flotilla astern); mirrored when sailing left.
+# Rows: tricorn crown, brim with skull, head (and arm), body.
+_HAT = [" ▄▄▄ ", "▀▀" + SKULL + "▀▀"]
 _CAPTAIN = {
-    "idle": ["_^_", " o ", "/|\\"],
-    "firing": ["_^_", " o/", "/| "],
-    "commanding": ["_^_", "\\o ", " |\\"],
+    "idle": _HAT + ["  o  ", " /|\\ "],
+    "commanding": _HAT + [" \\o  ", "  |\\ "],
+    "firing": _HAT + ["  o/ ", " /|  "],
 }
-_MIRROR = str.maketrans("/\\", "\\/")
 
 
 @dataclass
@@ -54,11 +57,17 @@ def captain_pose(agents: list[Agent], flash: bool) -> str:
 
 def _captain_lines(pose: str, direction: int) -> list[str]:
     lines = _CAPTAIN[pose]
-    return lines if direction > 0 else [l.translate(_MIRROR)[::-1] for l in lines]
+    return lines if direction > 0 else mirror(lines)
 
 
 def _lanes(width: int, height: int) -> tuple[int, int]:
     return max(0, (height - 1) // LANE_H), max(0, width // SLOT_W)
+
+
+def _apart(x: float, w: int, other: Boat) -> bool:
+    """Whether a boat of width w at x clears `other` by at least a cell."""
+    ow = sprite_width(sprite_key(other.agent_id, other.tier))
+    return x + w < other.x or other.x + ow < x
 
 
 def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) -> tuple[dict[str, Boat], int]:
@@ -85,8 +94,9 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
             siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
             order = [pref] + [l for l in order if l != pref]
         for lane in order:
+            w = sprite_width(sprite_key(a.id, t))
             slot = next((s for s in range(per_lane)
-                         if all(b.lane != lane or abs(b.x - s * SLOT_W) >= SLOT_W for b in boats.values())), None)
+                         if all(b.lane != lane or _apart(s * SLOT_W, w, b) for b in boats.values())), None)
             if slot is not None:
                 boats[a.id] = Boat(a.id, float(slot * SLOT_W), lane, 1, t)
                 break
@@ -105,7 +115,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         if a is None:
             continue
         key = sprite_key(b.agent_id, b.tier)
-        sprite = SPRITES[key]
+        sprite = SPRITES[key] if b.direction > 0 or b.agent_id != "main" else mirror(SPRITES[key])
         bob = ((frame // 4) + sum(map(ord, b.agent_id))) % 2  # bobbing: lift one row on alternate beats
         top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - bob  # lane 0 sits on the water
         x0 = int(round(b.x))
@@ -148,31 +158,24 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
 
 
 def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say: str, pose: str) -> bool:
-    """Stand the captain on the deck at the stern, with `say` beside the head. False (nothing drawn) if it
-    would leave the harbor or touch another boat; a call-out that doesn't fit is dropped, not the captain."""
+    """Stand the captain on the clear stern deck of the main ship, with `say` above his hat. Returns False
+    (nothing drawn) if he would leave the harbor; a call-out that doesn't fit is dropped, not the captain."""
     width = len(grid[0])
     figure = _captain_lines(pose, b.direction)
-    cx = x0 + (1 if b.direction > 0 else w - 1 - CAPTAIN_W)
+    cx = x0 if b.direction > 0 else x0 + w - CAPTAIN_W
     top = hull_y - len(figure)
     if cx < 0 or cx + CAPTAIN_W > width or top < 0 or hull_y > height - 2:
         return False
-    own = lambda x, y: x0 <= x < x0 + w and top <= y <= hull_y  # cells this boat may overwrite
-    for dy, line in enumerate(figure):
-        for dx, ch in enumerate(line):
-            if ch != " " and grid[top + dy][cx + dx][0] != " " and not own(cx + dx, top + dy):
-                return False
     for dy, line in enumerate(figure):
         for dx, ch in enumerate(line):
             if ch != " ":
-                grid[top + dy][cx + dx] = (ch, CAPTAIN_COLOR if dy == 0 else "bright_white")
-    if say:
-        sx = cx + CAPTAIN_W if b.direction > 0 else cx - len(say)
-        y = top + 1
-        cells = [(sx + i, y) for i in range(len(say))]
-        if all(0 <= x < width and (grid[y][x][0] == " " or own(x, y)) for x, y in cells):
-            style = "bold red" if say == CALL_OUT else "grey50"
-            for (x, y), ch in zip(cells, say):
-                grid[y][x] = (ch, style)
+                hat = dy < 2
+                style = f"bold {CAPTAIN_COLOR}" if hat and ch != SKULL else "bold bright_white" if hat else "bright_white"
+                grid[top + dy][cx + dx] = (ch, style)
+    y = top - 1
+    if say and y >= 0 and cx + len(say) <= width and all(grid[y][cx + i][0] == " " for i in range(len(say))):
+        for i, ch in enumerate(say):
+            grid[y][cx + i] = (ch, "bold red" if say == CALL_OUT else "grey50")
     return True
 
 
@@ -191,7 +194,8 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
         k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
         w = sprite_width(sprite_key(b.agent_id, b.tier))
         b.direction = parent.direction
-        target = parent.x - parent.direction * SLOT_W * k
+        lead = max(sprite_width(sprite_key(parent.agent_id, parent.tier)) - SLOT_W, 0)  # a long flagship
+        target = parent.x - parent.direction * SLOT_W * k + (lead if parent.direction < 0 else 0)
         if 0 <= target <= width - w:  # out of range (leader at an edge): hold, don't pile up
             b.x += (target - b.x) * min(1.0, 4 * dt)
         b.x = min(max(b.x, 0.0), float(max(width - w, 0)))

@@ -9,12 +9,32 @@ SAIL = "▲"
 _RAW = {
     "rowboat": ["  ▲  ", "  |  ", "\\___/"],
     "sloop": ["   ▲   ", "  ▲▲▲  ", "   |   ", "\\_____/"],
-    "galleon": ["  ▲   ▲  ", " ▲▲▲ ▲▲▲ ", "▲▲▲▲▲▲▲▲▲", "   | |   ", "\\_______/"],
+    "galleon": ["   ▲   ", "  ▲▲▲  ", " ▲▲▲▲▲ ", "▲▲▲▲▲▲▲", "   |   ", "\\_____/"],  # one tall sail
 }
 SPRITES: dict[str, list[str]] = {k: [l.ljust(max(map(len, v))) for l in v] for k, v in _RAW.items()}
 
-# Future captain hook: set to a SPRITES key (e.g. "captain") to give the main session its own sprite.
-MAIN_SPRITE_KEY: str | None = None
+# The main ship is longer: a clear stern deck (STERN_W columns plus a gap) behind the sails, where the captain stands.
+STERN_W = 5
+STERN_GAP = 1
+MAIN_ROWS = 5  # captain (4 rows) plus the hull
+
+
+def _main_sprite(lines: list[str]) -> list[str]:
+    pad = " " * (STERN_W + STERN_GAP)
+    w = len(lines[0]) + len(pad)
+    rows = [" " * w] * (MAIN_ROWS - len(lines)) + [pad + l for l in lines[:-1]]
+    return rows + ["\\" + "_" * (w - 2) + "/"]
+
+
+for _k in list(SPRITES):
+    SPRITES["main_" + _k] = _main_sprite(SPRITES[_k])
+
+_FLIP = str.maketrans("/\\", "\\/")
+
+
+def mirror(lines: list[str]) -> list[str]:
+    """The sprite seen from the other side (a boat sailing left)."""
+    return [l.translate(_FLIP)[::-1] for l in lines]
 
 
 def tier(burn: int) -> Literal["rowboat", "sloop", "galleon"]:
@@ -24,7 +44,7 @@ def tier(burn: int) -> Literal["rowboat", "sloop", "galleon"]:
 
 
 def sprite_key(agent_id: str, boat_tier: str) -> str:
-    return MAIN_SPRITE_KEY if agent_id == "main" and MAIN_SPRITE_KEY else boat_tier
+    return "main_" + boat_tier if agent_id == "main" else boat_tier
 
 
 def sprite_width(key: str) -> int:
