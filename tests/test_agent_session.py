@@ -100,7 +100,7 @@ def agent_args(call):
 
 
 def test_new_branches_from_detected_base_and_copies_files(world):
-    world.config("config", "COPY_FILES=(.env worker/.dev.vars missing.txt)\n")
+    world.config("config", "COPY_FILES=.env worker/.dev.vars missing.txt\n")
     (world.repo / "worker").mkdir()
     (world.repo / "worker" / ".dev.vars").write_text("X=1\n")
     r = world.session("new", "alpha")
@@ -111,6 +111,43 @@ def test_new_branches_from_detected_base_and_copies_files(world):
     assert (wt / ".env").read_text() == "SECRET=1\n"
     assert (wt / "worker" / ".dev.vars").read_text() == "X=1\n"
     assert not (wt / "missing.txt").exists()
+
+
+def test_config_is_never_executed(world):
+    pwned = world.tmp / "pwned"
+    bt = world.tmp / "pwned2"
+    world.config(
+        "config",
+        f'PREFIX="zz-"\nCOPY_FILES=$(touch {pwned})\nPRACTICE_DOC=`touch {bt}`\n$(touch {pwned})\n',
+    )
+    world.session("new", "alpha", "--prompt", "x")
+    assert not pwned.exists() and not bt.exists()
+
+
+@pytest.mark.parametrize("entry", ["../x", "/etc/passwd", "a/../b"])
+def test_copy_files_rejects_escaping_paths(world, entry):
+    world.config("config", f"COPY_FILES=.env {entry}\n")
+    r = world.session("new", "alpha")
+    assert r.returncode != 0
+    assert "COPY_FILES" in r.stderr
+    assert not (world.tmp / "proj-worktrees" / "alpha").exists()
+
+
+@pytest.mark.parametrize("line", ["PRACTICE_DOC=/etc/passwd", "PRACTICE_DOC=../x.md", "PREFIX=Bad_Prefix",
+                                  "CONTROLLER_MODEL=a\"b", "ADVISOR_MODEL=x\",\"y"])
+def test_invalid_values_are_refused(world, line):
+    world.config("config", line + "\n")
+    r = world.session("controller")
+    assert r.returncode != 0
+    assert world.calls() == []
+
+
+def test_unknown_key_warns_but_runs(world):
+    world.config("config", "# comment\n\nBOGUS=1\nPREFIX='qq-'\n")
+    r = world.session("new", "alpha", "--prompt", "x")
+    assert r.returncode == 0, r.stderr
+    assert "BOGUS" in r.stderr
+    assert world.rex_call("new")[1] == "qq-alpha"
 
 
 def test_new_falls_back_to_master_without_origin_head(world):

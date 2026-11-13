@@ -34,8 +34,8 @@
 # $AGENT_SESSION_ADVISOR_MODEL (default fable), so its judgment calls get a stronger model.
 #
 # Optional per-project config in <repo>/.agent-session/:
-#   config               sourced bash: PREFIX, COPY_FILES (array), PRACTICE_DOC,
-#                        CONTROLLER_MODEL, ADVISOR_MODEL
+#   config               KEY=value lines (never sourced): PREFIX, COPY_FILES (space-separated),
+#                        PRACTICE_DOC, CONTROLLER_MODEL, ADVISOR_MODEL
 #   agent-rules.md       extra rules inserted into every agent's preamble
 #   controller-rules.md  extra rules appended to the controller's prompt
 set -euo pipefail
@@ -56,6 +56,38 @@ usage() { sed -n '4,9p' "$0" | sed 's/^# \{0,3\}//'; exit 1; }
 
 valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,40}$ ]] || die "name must be lowercase letters, digits and dashes: '$1'"; }
 
+# Read KEY=value lines from a project config. Never sourced or eval'd: a cloned repo's
+# config must not be able to run code. Only the known keys are accepted.
+parse_config() { # parse_config <file>
+  [[ -f "$1" ]] || return 0
+  local line key val f
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == *=* ]] || { echo "agent-session: ignoring config line without '=': $line" >&2; continue; }
+    key="${line%%=*}"; val="${line#*=}"
+    key="${key//[[:space:]]/}"
+    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+    if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    case "$key" in
+      PREFIX) [[ "$val" =~ ^[a-z0-9][a-z0-9-]{0,20}$ ]] || die "config: PREFIX must match ^[a-z0-9][a-z0-9-]{0,20}\$: '$val'"
+              PREFIX="$val" ;;
+      COPY_FILES) read -r -a COPY_FILES <<<"$val"
+                  for f in ${COPY_FILES[@]+"${COPY_FILES[@]}"}; do safe_relpath COPY_FILES "$f"; done ;;
+      PRACTICE_DOC) safe_relpath PRACTICE_DOC "$val"; PRACTICE_DOC="$val" ;;
+      CONTROLLER_MODEL|ADVISOR_MODEL)
+        [[ "$val" =~ ^[][a-z0-9.-]+$ ]] || die "config: $key may only use a-z 0-9 . [ ] -: '$val'"
+        printf -v "$key" '%s' "$val" ;;
+      *) echo "agent-session: ignoring unknown config key '$key' in $1" >&2 ;;
+    esac
+  done <"$1"
+}
+
+safe_relpath() { # safe_relpath <key> <path>: relative, no .. segment
+  if [[ "$2" == /* || "$2" =~ (^|/)\.\.(/|$) ]]; then
+    die "config: $1 entries must be relative paths without '..': '$2'"
+  fi
+}
+
 load_config() {
   CONFIG_DIR="$ROOT/.agent-session"
   # Rex session labels are global across projects, so prefix ours.
@@ -65,8 +97,7 @@ load_config() {
   [[ -f "$ROOT/ai-ops/local-config/agent-sessions.md" ]] && PRACTICE_DOC="ai-ops/local-config/agent-sessions.md"
   CONTROLLER_MODEL=sonnet
   ADVISOR_MODEL=fable
-  # shellcheck disable=SC1091
-  if [[ -f "$CONFIG_DIR/config" ]]; then source "$CONFIG_DIR/config"; fi
+  parse_config "$CONFIG_DIR/config"
   CONTROLLER="${PREFIX}controller"
   CONTROLLER_MODEL="${AGENT_SESSION_CONTROLLER_MODEL:-$CONTROLLER_MODEL}"
   ADVISOR_MODEL="${AGENT_SESSION_ADVISOR_MODEL:-$ADVISOR_MODEL}"

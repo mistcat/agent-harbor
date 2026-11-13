@@ -122,7 +122,7 @@ Everything is optional, in `<repo root>/.agent-session/`:
 
 | File | Purpose |
 | --- | --- |
-| `config` | Sourced bash. `PREFIX` (default `<repo dir>-`), `COPY_FILES` (array of git-ignored files copied into each new worktree, default `(.env)`), `PRACTICE_DOC` (default `ai-ops/local-config/agent-sessions.md` if present, else the shipped doc), `CONTROLLER_MODEL`, `ADVISOR_MODEL` |
+| `config` | Plain `KEY=value` lines (never executed; unknown keys warn). `PREFIX` (default `<repo dir>-`; lowercase letters, digits, dashes), `COPY_FILES` (space-separated git-ignored files copied into each new worktree, default `.env`; relative paths, no `..`), `PRACTICE_DOC` (default `ai-ops/local-config/agent-sessions.md` if present, else the shipped doc), `CONTROLLER_MODEL`, `ADVISOR_MODEL` |
 | `agent-rules.md` | Bullets inserted into every agent's preamble (live-write rules, the project's test commands) |
 | `controller-rules.md` | Text added to the controller's prompt |
 
