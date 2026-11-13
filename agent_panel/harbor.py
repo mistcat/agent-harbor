@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from rich.cells import cell_len
 from rich.text import Text
 
-from agent_panel.boats import SAIL, SPRITES, STERN_W, mirror, sprite_key, sprite_width, tier
+from agent_panel.boats import EMBLEM, SAIL, SPRITES, STERN_W, mirror, sprite_key, sprite_width, tier
 from agent_panel.colors import model_color
 from agent_panel.model import Agent
 
@@ -12,7 +12,8 @@ SPEED = 6.0  # cells per second for a running boat
 WAKE = "~-."  # nearest to farthest behind the hull
 LANE_H = 6  # tallest sprite
 SLOT_W = 10  # widest sprite plus a gap
-CAPTAIN_COLOR = "gold1"  # not used by any model family
+CAPTAIN_COLOR = "yellow"  # the skull; not used by any model family
+HAT_STYLE = "bold bright_white"
 CAPTAIN_W = STERN_W
 SKULL = "☠" if cell_len("☠") == 1 else "x"
 CALL_OUT = "Fire!"
@@ -124,7 +125,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
             for dx, ch in enumerate(line):
                 x = x0 + dx
                 if ch != " " and 0 <= y < height - 1 and 0 <= x < width:
-                    grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "grey70")
+                    grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "bold bright_white" if ch in EMBLEM else "grey70")
         hull_y = top + len(sprite) - 1
         seated = captain and b.agent_id == "main" and _seat_captain(
             grid, b, x0, hull_y, len(sprite[0]), height, CALL_OUT if flash else "zzz" if a.id not in active else "", captain_pose(agents, flash))
@@ -170,7 +171,7 @@ def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say:
         for dx, ch in enumerate(line):
             if ch != " ":
                 hat = dy < 2
-                style = f"bold {CAPTAIN_COLOR}" if hat and ch != SKULL else "bold bright_white" if hat else "bright_white"
+                style = f"bold {CAPTAIN_COLOR}" if ch == SKULL else HAT_STYLE if hat else "bright_white"
                 grid[top + dy][cx + dx] = (ch, style)
     y = top - 1
     if say and y >= 0 and cx + len(say) <= width and all(grid[y][cx + i][0] == " " for i in range(len(say))):

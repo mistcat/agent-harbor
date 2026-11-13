@@ -1,10 +1,15 @@
 """Boat sprites and size tiers. Sail cells are drawn with SAIL so they can be colored by model."""
 from typing import Literal
 
+from rich.cells import cell_len
+
 TIER_SLOOP = 50_000
 TIER_GALLEON = 300_000  # main sessions pass this quickly, so the flagship looks it
 
 SAIL = "▲"
+CROSSBONES = "╳" if cell_len("╳") == 1 else "X"
+SAIL_SKULL = "☠" if cell_len("☠") == 1 else "o"
+EMBLEM = {CROSSBONES, SAIL_SKULL}  # Jolly Roger on the main ship's sail
 
 _RAW = {
     "rowboat": ["  ▲  ", "  |  ", "\\___/"],
@@ -19,7 +24,20 @@ STERN_GAP = 1
 MAIN_ROWS = 5  # captain (4 rows) plus the hull
 
 
+def _jolly_roger(lines: list[str]) -> list[str]:
+    """Crossbones in a middle sail row, a skull in the row above when that row is 3+ sail cells wide."""
+    sail_rows = [i for i, l in enumerate(lines) if SAIL in l]
+    cross = sail_rows[len(sail_rows) // 2]
+    out = list(lines)
+    mid = len(lines[0]) // 2
+    out[cross] = out[cross][:mid] + CROSSBONES + out[cross][mid + 1:]
+    if cross - 1 in sail_rows and lines[cross - 1].count(SAIL) >= 3:
+        out[cross - 1] = out[cross - 1][:mid] + SAIL_SKULL + out[cross - 1][mid + 1:]
+    return out
+
+
 def _main_sprite(lines: list[str]) -> list[str]:
+    lines = _jolly_roger(lines)
     pad = " " * (STERN_W + STERN_GAP)
     w = len(lines[0]) + len(pad)
     rows = [" " * w] * (MAIN_ROWS - len(lines)) + [pad + l for l in lines[:-1]]

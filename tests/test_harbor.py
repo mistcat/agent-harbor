@@ -292,7 +292,7 @@ def captain_positions(t, w):
     """Columns/rows (y, x) of cells whose style is the captain color."""
     pos = []
     for span in t.spans:
-        if CAPTAIN_COLOR in str(span.style):
+        if str(span.style) == f"bold {CAPTAIN_COLOR}":
             for i in range(span.start, span.end):
                 pos.append((i // (w + 1), i % (w + 1)))
     return pos
@@ -391,9 +391,38 @@ def test_captain_never_overlaps_sail_or_hull_art():
                             assert cb == " "  # the captain (and call-out) only ever fill blank cells
 
 
-def test_hat_is_a_tricorn_with_a_skull_in_gold():
+def cells_with_style(t, w, style):
+    return {(i // (w + 1), i % (w + 1)): t.plain[i] for sp in t.spans if str(sp.style) == style for i in range(sp.start, sp.end)}
+
+
+def test_hat_is_white_and_the_skull_is_yellow():
+    from agent_panel.harbor import HAT_STYLE, SKULL
     ags = [ag("main", None, 0, "main", status="running")]
     boats, _ = layout(ags, 60, 14, {})
     t = render_harbor(ags, boats, 60, 14, 0)
-    assert "▄▄▄" in t.plain and "▀▀☠▀▀" in t.plain
-    assert len(captain_positions(t, 60)) >= 5
+    assert "▄▄▄" in t.plain and "▀▀" + SKULL + "▀▀" in t.plain
+    hat = cells_with_style(t, 60, HAT_STYLE)
+    assert {"▄", "▀"} <= set(hat.values()) and SKULL not in hat.values()
+    assert list(cells_with_style(t, 60, f"bold {CAPTAIN_COLOR}").values()) == [SKULL]
+    assert CAPTAIN_COLOR == "yellow" and CAPTAIN_COLOR not in {model_color(m) for m in ("opus", "sonnet", "haiku", "x")}
+
+
+def test_jolly_roger_on_main_sail_only():
+    from agent_panel.boats import CROSSBONES, SAIL_SKULL
+    assert cell_len_ok(CROSSBONES) and cell_len_ok(SAIL_SKULL)
+    for burn, skull in ((900_000, True), (60_000, False), (1, False)):
+        ags = [ag("main", None, 0, "main", burn=burn, status="running"), ag("a1", "main", 1, "t", burn=burn, status="running")]
+        boats, _ = layout(ags, 70, 20, {})
+        boats["main"].x, boats["a1"].x = 0.0, 40.0
+        t = render_harbor(ags, boats, 70, 20, 0)
+        emblem = cells_with_style(t, 70, "bold bright_white")
+        main_x = range(0, len(SPRITES["main_" + tier(burn)][0]))
+        assert CROSSBONES in emblem.values() and all(x in main_x for _, x in emblem)  # none on the subagent
+        assert t.plain.count(SAIL_SKULL) == 1 + skull  # the hat's skull, plus one in a sail wide enough
+        assert t.plain.count(CROSSBONES) == 1
+        assert CROSSBONES not in "".join(SPRITES[tier(burn)])
+
+
+def cell_len_ok(ch):
+    from rich.cells import cell_len
+    return cell_len(ch) == 1
