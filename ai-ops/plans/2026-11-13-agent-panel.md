@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Read-only: never write under the Claude config dir, no hooks, no settings edits, no input sent to sessions, no network calls.
+- Read-only: never write under the Claude config dir, no hooks, no settings edits, no input sent to sessions, no network calls. The one allowed side effect besides drawing is playing the cannon WAV with `afplay`.
 - Config dir: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
 - Token usage counted once per `message.id`; skip `isSidechain: true` entries in the main file.
 - `burn` = `input_tokens + cache_creation_input_tokens + output_tokens`; `cache_read_input_tokens` kept separately.
@@ -180,15 +180,18 @@
 ### Task 7: Cannon fire on advisor calls
 
 **Files:**
-- Create: `agent_panel/effects.py`, `tests/test_effects.py`
+- Create: `agent_panel/effects.py`, `agent_panel/sound.py`, `scripts/make_cannon.py`, `agent_panel/assets/cannon.wav` (generated), `tests/test_effects.py`, `tests/test_sound.py`
+- Modify: `pyproject.toml` (package data for `assets/*.wav`), `agent_panel/cli.py` (`--no-sound`)
 - Modify: `agent_panel/app.py`, `agent_panel/harbor.py`
 
 **Interfaces:**
 - Consumes: `Snapshot.new_shots`.
 - Produces: `@dataclass class Shot`: `x: float`, `y: float`, `vx: float`, `age: int`. Plus `fire(main_boat: Boat) -> Shot`, `advance(shots: list[Shot]) -> list[Shot]` (gravity arc; returns surviving shots and adds a splash state when one hits the waterline), and `overlay(text_lines, shots, flash: bool)` for the gunport flash on the main ship for about 3 frames.
 
-- [ ] **Step 1: Write failing tests:** `test_shot_arcs_and_splashes` (y rises, then falls, and the shot ends as a splash then disappears), `test_one_shot_per_new_advisor_call`, and `test_no_fire_on_first_load` (an app fed a snapshot with past advisor calls and `new_shots == 0` creates no shots).
-- [ ] **Step 2–4:** FAIL → implement → PASS. Check by eye: an advisor call in the watched session fires the cannon.
+- Also produces (sound): `scripts/make_cannon.py` (stdlib `wave`/`math`/`random` only) writes `agent_panel/assets/cannon.wav` (about 0.8 s, 22050 Hz mono, a 50–60 Hz thump plus a noise burst with an exponential decay). The generated WAV is committed and included as package data. `agent_panel/sound.py`: `class Boomer(enabled: bool, min_gap_s: float = 2.0, player: str = "afplay")` with `.boom(now: float) -> bool`. It starts `subprocess.Popen([player, wav], stdout=DEVNULL, stderr=DEVNULL)` without waiting, returns `False` when disabled, rate-limited or the player is missing (`shutil.which`), and never raises. CLI: `--no-sound`.
+
+- [ ] **Step 1: Write failing tests:** `test_shot_arcs_and_splashes` (y rises, then falls, and the shot ends as a splash then disappears), `test_one_shot_per_new_advisor_call`, `test_no_fire_on_first_load` (an app fed a snapshot with past advisor calls and `new_shots == 0` creates no shots), `test_boomer_rate_limits` (`boom(0)` True, `boom(1)` False, `boom(2.5)` True; use `player="true"` so nothing plays), `test_boomer_disabled_and_missing_player` (`enabled=False` → False; `player="no-such-binary"` → False, no exception), and `test_cannon_wav_valid` (the `wave` module opens it: 1 channel, 22050 Hz, 0.5–1.2 s).
+- [ ] **Step 2–4:** FAIL → implement → PASS. Check by eye and ear: an advisor call in the watched session fires the cannon and booms once.
 - [ ] **Step 5:** Commit `feat: cannon fire on advisor calls`.
 
 ### Task 8: Flotilla grouping, README, final check

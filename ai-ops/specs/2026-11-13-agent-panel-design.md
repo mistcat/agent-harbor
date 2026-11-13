@@ -143,6 +143,13 @@ The same agents as boats on a waterline:
 - **Advisor call:** the main ship flashes and fires a cannon (flash at the gunport, a `*` arcing out, a splash).
   It fires when the call starts (the `server_tool_use` entry), not when the result arrives (decided). On first
   load, past calls are counted but don't fire; only new ones do.
+- **Cannon sound** (Nate, 2026-11-13): each shot also plays a cannon boom. Rex has no sound feature (checked:
+  none of the Rex app's 117 actions involve sound), so the panel plays it itself with macOS `afplay`, without
+  waiting for it to finish. The boom is a short WAV synthesized by a small script in the repo (a low thump plus
+  a noise burst with a fast decay), so no third-party audio or license is involved. On by default;
+  `--no-sound` turns it off; at most one boom every 2 s; silently skipped if `afplay` is missing. Playing a
+  local sound is the one side effect allowed besides drawing; the read-only promise is about Claude's files
+  and sessions.
 - **Parent and child:** children sail just behind their parent, as a flotilla.
 - Boats sit in lanes; if there are more agents than lanes fit, the builder picks a sensible fallback
   (smaller boats, or a "+3 more" marker). If the pane is too short, the harbor hides and the tree stays.
