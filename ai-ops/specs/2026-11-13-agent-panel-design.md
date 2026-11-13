@@ -171,6 +171,13 @@ flotilla grouping. If the build runs out of budget, stopping after any step leav
 - A headless Textual test (`App.run_test`) that the app starts, renders the tree for a fixture session, and
   survives a narrow pane. Visual polish is checked by eye in a real Rex pane.
 
+## Future ideas (not v1)
+
+- **Pirate captain for the main session** (Nate, 2026-11-13): a small captain figure in the harbor standing in
+  for the main session, e.g. on the main ship's deck or on the dock giving orders. Leave room for it: keep the
+  main session's sprite separate from the subagent boats so a captain can be added without reworking them.
+- Watching several Claude sessions at once (see Non-goals).
+
 ## Left to the builder
 
 Burn thresholds and bar scale; exact boat art; idle rule for the main session; colors beyond the four named;
