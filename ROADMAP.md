@@ -10,7 +10,7 @@
 ## Later
 
 - Watch several Claude sessions at once: the whole fleet a controller is running.
-- Switch the crm repo from its own copy of `bin/agent-session` to the shared one here.
+- Switch the crm repo from its own copy of `bin/agent-session` to the shared one here (copy `examples/crm/.agent-session/`).
 
 ## Known minor issues
 

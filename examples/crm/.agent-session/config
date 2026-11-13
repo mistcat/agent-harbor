@@ -1,0 +1,5 @@
+# agent-session config for the crm repo. Copy this folder to <repo>/.agent-session/.
+PREFIX="crm-"
+COPY_FILES=(.env worker/.dev.vars)
+# CONTROLLER_MODEL=sonnet
+# ADVISOR_MODEL=fable
