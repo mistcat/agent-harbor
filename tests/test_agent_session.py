@@ -111,6 +111,7 @@ def test_new_branches_from_detected_base_and_copies_files(world):
     assert (wt / ".env").read_text() == "SECRET=1\n"
     assert (wt / "worker" / ".dev.vars").read_text() == "X=1\n"
     assert not (wt / "missing.txt").exists()
+    assert "missing.txt not found" in r.stderr
 
 
 def test_config_is_never_executed(world):

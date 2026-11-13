@@ -189,6 +189,8 @@ cmd_new() {
     if [[ -f "$ROOT/$f" ]]; then
       mkdir -p "$(dirname "$wt/$f")"
       cp "$ROOT/$f" "$wt/$f"
+    else
+      echo "agent-session: warning: $f not found in $ROOT, not copied" >&2
     fi
   done
   command -v direnv >/dev/null && direnv allow "$wt" >/dev/null 2>&1 || true
