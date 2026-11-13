@@ -99,3 +99,90 @@ def test_first_boats_sit_on_the_waterline_lane():
     assert {b.lane for b in boats.values()} == {0}
     lines = render_harbor(ags, boats, 50, 30, 0).plain.split("\n")
     assert "\\" in lines[-2] and set(lines[-1]) == {"~"}
+
+
+# ---- Task 6: motion, wake, anchored zzz, frame rate ----
+from agent_panel.app import fps_for
+from agent_panel.harbor import step
+
+
+def sailing(n_done=0):
+    ags = [ag("main", None, 0, "main", "opus 5.5", burn=1, status="running")]
+    ags += [ag(f"d{i}", "main", 1, "fin", burn=1, status="done") for i in range(n_done)]
+    return ags
+
+
+def test_running_boat_moves_done_boat_stays():
+    ags = sailing(1)
+    boats, _ = layout(ags, 60, 10, {})
+    before = {k: b.x for k, b in boats.items()}
+    step(boats, ags, 1.0, 60)
+    assert boats["main"].x != before["main"]
+    assert boats["d0"].x == before["d0"]
+
+
+def test_boat_turns_at_edge():
+    ags = sailing()
+    boats, _ = layout(ags, 40, 10, {})
+    w = len(SPRITES["rowboat"][0])
+    boats["main"].x, boats["main"].direction = 36.0, 1
+    step(boats, ags, 1.0, 40)
+    assert boats["main"].direction == -1 and boats["main"].x <= 40 - w
+    boats["main"].x = 0.5
+    step(boats, ags, 1.0, 40)
+    assert boats["main"].direction == 1 and boats["main"].x >= 0
+
+
+def hull_line(boats, ags, frame=0, width=60):
+    lines = render_harbor(ags, boats, width, 10, frame).plain.split("\n")
+    return next(l for l in lines if "\\" in l)
+
+
+def test_wake_behind_moving_boat():
+    ags = sailing()
+    w = len(SPRITES["rowboat"][0])
+    for direction in (1, -1):
+        boats, _ = layout(ags, 60, 10, {})
+        boats["main"].x, boats["main"].direction = 30.0, direction
+        line = hull_line(boats, ags)
+        x = line.index("\\")
+        behind = line[x - 3:x] if direction == 1 else line[x + w:x + w + 3]
+        ahead = line[x + w:x + w + 3] if direction == 1 else line[x - 3:x]
+        assert behind.strip() and not ahead.strip()
+
+
+def test_no_wake_for_anchored_boat():
+    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    boats, _ = layout(done, 60, 10, {})
+    boats["d"].x = 30.0
+    line = hull_line(boats, done)
+    x = line.index("\\")
+    assert not line[x - 3:x].strip() and not line[x + 5:x + 8].strip()
+
+
+def test_anchored_boat_shows_zzz():
+    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    boats, _ = layout(done, 60, 10, {})
+    assert "zzz" in render_harbor(done, boats, 60, 10, 0).plain
+    run = sailing()
+    boats, _ = layout(run, 60, 10, {})
+    assert "zzz" not in render_harbor(run, boats, 60, 10, 0).plain
+
+
+def test_anchored_boat_bobs():
+    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    boats, _ = layout(done, 60, 10, {})
+    assert render_harbor(done, boats, 60, 10, 0).plain != render_harbor(done, boats, 60, 10, 4).plain
+
+
+def test_boats_stay_on_the_water_when_pane_grows():
+    ags = agents(2)
+    boats, _ = layout(ags, 50, 12, {})
+    boats, _ = layout(ags, 50, 30, boats)
+    lines = render_harbor(ags, boats, 50, 30, 0).plain.split("\n")
+    assert "\\" in lines[-2]
+
+
+def test_fps_for():
+    assert fps_for(sailing()) == 10
+    assert fps_for([ag("d", None, 0, "x", status="done"), ag("i", None, 0, "x", status="idle")]) == 2

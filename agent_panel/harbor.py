@@ -7,6 +7,8 @@ from agent_panel.boats import SAIL, SPRITES, sprite_key, sprite_width, tier
 from agent_panel.colors import model_color
 from agent_panel.model import Agent
 
+SPEED = 6.0  # cells per second for a running boat
+WAKE = "~-."  # nearest to farthest behind the hull
 LANE_H = 5  # tallest sprite
 SLOT_W = 10  # widest sprite plus a gap
 
@@ -58,13 +60,27 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         if a is None:
             continue
         key = sprite_key(b.agent_id, b.tier)
-        top = (height - 1) - (b.lane + 1) * LANE_H  # lane 0 sits on the water, so resizing keeps boats afloat
-        for dy, line in enumerate(SPRITES[key]):
-            y = top + (LANE_H - len(SPRITES[key])) + dy
+        sprite = SPRITES[key]
+        bob = ((frame // 4) + sum(map(ord, b.agent_id))) % 2  # bobbing: lift one row on alternate beats
+        top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - bob  # lane 0 sits on the water
+        x0 = int(round(b.x))
+        for dy, line in enumerate(sprite):
+            y = top + dy
             for dx, ch in enumerate(line):
-                x = int(round(b.x)) + dx
+                x = x0 + dx
                 if ch != " " and 0 <= y < height - 1 and 0 <= x < width:
                     grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "grey70")
+        hull_y = top + len(sprite) - 1
+        if a.status == "running":
+            for i, ch in enumerate(WAKE):
+                x = x0 - 1 - i if b.direction == 1 else x0 + len(sprite[0]) + i
+                if 0 <= x < width and 0 <= hull_y < height - 1 and grid[hull_y][x][0] == " ":
+                    grid[hull_y][x] = (ch, "dodger_blue3" if i < 2 else "grey42")
+        else:
+            zx = x0 + len(sprite[0]) // 2 + 1
+            for i, ch in enumerate("zzz"):
+                if 0 <= top - 1 < height - 1 and 0 <= zx + i < width and grid[top - 1][zx + i][0] == " ":
+                    grid[top - 1][zx + i] = (ch, "grey50")
     over = len(agents) - len(boats)
     if over > 0:
         label = f"+{over} more"[:width]
@@ -77,3 +93,18 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         if y < height - 1:
             out.append("\n")
     return out
+
+
+def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> None:
+    """Move running boats and turn them at the edges. Done and idle boats stay put."""
+    by_id = {a.id: a for a in agents}
+    for b in boats.values():
+        a = by_id.get(b.agent_id)
+        if a is None or a.status != "running":
+            continue
+        w = sprite_width(sprite_key(b.agent_id, b.tier))
+        b.x += b.direction * SPEED * dt
+        if b.x > width - w:
+            b.x, b.direction = float(max(width - w, 0)), -1
+        elif b.x < 0:
+            b.x, b.direction = 0.0, 1

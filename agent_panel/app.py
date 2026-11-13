@@ -1,17 +1,22 @@
+import time
 from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
-from agent_panel.harbor import Boat, layout, render_harbor
+from agent_panel.harbor import Boat, layout, render_harbor, step
+from agent_panel.model import Agent
 from agent_panel.session import Snapshot, Watcher
 from agent_panel.tree import render_tree
 
 POLL_S = 0.5
 MIN_HARBOR_ROWS = 8
 TREE_MAX_FRAC = 0.6
-FRAME_S = 0.1
+
+
+def fps_for(agents: list[Agent]) -> float:
+    return 10 if any(a.status == "running" for a in agents) else 2
 
 
 class AgentPanelApp(App):
@@ -28,6 +33,11 @@ class AgentPanelApp(App):
         self.snapshot: Snapshot | None = None
         self.frame = 0
         self.boats: dict[str, Boat] = {}
+        self._fps = 2.0
+        self._dt = 0.0
+        self._timer = None
+        self._last_tick = time.monotonic()
+        self._shown: dict[str, Text] = {}  # last content per widget, so unchanged frames cost nothing
 
     def compose(self) -> ComposeResult:
         yield Static("agent-panel", id="header")
@@ -37,29 +47,39 @@ class AgentPanelApp(App):
     def on_mount(self) -> None:
         self.poll()
         self.set_interval(POLL_S, self.poll)
-        self.set_interval(FRAME_S, self.tick)
+        self._timer = self.set_interval(1 / self._fps, self.tick)
 
     def poll(self) -> None:
         self.snapshot = self.watcher.poll() if self.watcher else None
+        fps = fps_for(self.snapshot.agents) if self.snapshot else 2
+        if fps != self._fps and self._timer is not None:
+            self._fps = fps
+            self._timer.stop()
+            self._timer = self.set_interval(1 / fps, self.tick)
         self.paint()
 
     def tick(self) -> None:
+        now = time.monotonic()
+        self._dt, self._last_tick = now - self._last_tick, now
         self.frame += 1
         self.paint()
+        self._dt = 0.0
 
     def paint(self) -> None:
+        if not self.query("#tree"):  # a timer can fire before compose finishes or during shutdown
+            return
         snap = self.snapshot
         header = self.query_one("#header", Static)
         tree = self.query_one("#tree", Static)
         if snap is None:
             header.update(f"agent-panel · {self.waiting_dir.name}")
-            tree.update(Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
+            self._show(tree, Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
             self.query_one("#harbor", Static).display = False
             return
         header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}")
         width = tree.size.width or self.size.width
         rendered = render_tree(snap.agents, width, self.frame, snap.advisor_model)
-        tree.update(rendered)
+        self._show(tree, rendered)
         self.paint_harbor(snap, rendered.plain.count("\n") + 1)
 
     def paint_harbor(self, snap: Snapshot, tree_lines: int) -> None:
@@ -71,4 +91,10 @@ class AgentPanelApp(App):
             return
         width = self.size.width
         self.boats, _ = layout(snap.agents, width, rows, self.boats)
-        harbor.update(render_harbor(snap.agents, self.boats, width, rows, self.frame))
+        step(self.boats, snap.agents, self._dt, width)
+        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame))
+
+    def _show(self, widget: Static, text: Text) -> None:
+        if self._shown.get(widget.id) != text:
+            self._shown[widget.id] = text
+            widget.update(text)
