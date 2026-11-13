@@ -1,0 +1,105 @@
+"""Incremental JSONL transcript reader.
+
+Field paths verified against real transcripts on 2026-11-13. Notes: an Agent
+tool_use's input.model is optional, and a subagent .meta.json may lack `finished`.
+"""
+import json
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+class Tail:
+    """Reads only the bytes appended since the last poll."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.offset = 0
+        self._buf = b""
+        self.was_reset = False
+
+    def poll(self) -> list[dict]:
+        self.was_reset = False
+        try:
+            size = self.path.stat().st_size
+            if size < self.offset:
+                self.offset, self._buf, self.was_reset = 0, b"", True
+            with open(self.path, "rb") as f:
+                f.seek(self.offset)
+                data = f.read()
+        except OSError:
+            return []
+        self.offset += len(data)
+        data = self._buf + data
+        *lines, self._buf = data.split(b"\n")
+        out = []
+        for line in lines:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
+
+
+@dataclass
+class FileStats:
+    model: str | None = None
+    effort: str | None = None
+    advisor_model: str | None = None
+    burn: int = 0
+    cache_read: int = 0
+    advisor_calls: int = 0
+    last_advisor_at: str | None = None
+    agent_calls: dict[str, dict] = field(default_factory=dict)
+    seen_ids: set[str] = field(default_factory=set)
+    last_entry_at: str | None = None
+
+
+def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
+    """Fold entries into stats; return the number of new advisor calls."""
+    new_advisor = 0
+    for e in entries:
+        if skip_sidechain and e.get("isSidechain"):
+            continue
+        ts = e.get("timestamp")
+        if ts:
+            stats.last_entry_at = ts
+        msg = e.get("message")
+        if e.get("type") != "assistant" or not isinstance(msg, dict):
+            continue
+        if msg.get("model"):
+            stats.model = msg["model"]
+        if e.get("effort"):
+            stats.effort = e["effort"]
+        if e.get("advisorModel"):
+            stats.advisor_model = e["advisorModel"]
+        mid = msg.get("id")
+        usage = msg.get("usage")
+        if mid and mid not in stats.seen_ids and isinstance(usage, dict):
+            stats.seen_ids.add(mid)
+            stats.burn += sum(usage.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "output_tokens"))
+            stats.cache_read += usage.get("cache_read_input_tokens") or 0
+        content = msg.get("content")
+        for b in content if isinstance(content, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "Agent" and b.get("id"):
+                inp = b.get("input") or {}
+                stats.agent_calls[b["id"]] = {
+                    "description": inp.get("description"),
+                    "model": inp.get("model"),
+                    "subagent_type": inp.get("subagent_type"),
+                }
+            elif b.get("type") == "server_tool_use" and b.get("name") == "advisor":
+                stats.advisor_calls += 1
+                new_advisor += 1
+                stats.last_advisor_at = ts or stats.last_advisor_at
+    return new_advisor
+
+
+def short_model(model_id: str | None) -> str:
+    """claude-sonnet-5-5 -> 'sonnet 5.5'; None -> '?'; unknown shapes unchanged."""
+    if not model_id:
+        return "?"
+    m = re.fullmatch(r"claude-([a-z]+)-(\d+)-(\d+)", model_id)
+    return f"{m[1]} {m[2]}.{m[3]}" if m else model_id
