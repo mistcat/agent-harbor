@@ -18,4 +18,3 @@ From the final review on 2026-11-13, not yet fixed:
 - The header re-lays out every tick (skips the unchanged-update cache).
 - Dead code: `FileStats.last_entry_at`; `config_dir()`/`project_dir()` are unused outside tests.
 - README doesn't mention quitting (ctrl+q) or that `cache_read` is collected but not shown.
-- `build/` is not in `.gitignore`.
