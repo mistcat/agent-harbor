@@ -55,11 +55,16 @@ class FileStats:
     last_entry_at: str | None = None
 
 
+def _count(v) -> int:
+    """A token count, or 0 for anything that isn't a plain int."""
+    return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+
 def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
     """Fold entries into stats; return the number of new advisor calls."""
     new_advisor = 0
     for e in entries:
-        if skip_sidechain and e.get("isSidechain"):
+        if not isinstance(e, dict) or skip_sidechain and e.get("isSidechain"):
             continue
         ts = e.get("timestamp")
         if ts:
@@ -77,14 +82,14 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
         usage = msg.get("usage")
         if mid and mid not in stats.seen_ids and isinstance(usage, dict):
             stats.seen_ids.add(mid)
-            stats.burn += sum(usage.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "output_tokens"))
-            stats.cache_read += usage.get("cache_read_input_tokens") or 0
+            stats.burn += sum(_count(usage.get(k)) for k in ("input_tokens", "cache_creation_input_tokens", "output_tokens"))
+            stats.cache_read += _count(usage.get("cache_read_input_tokens"))
         content = msg.get("content")
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
                 continue
             if b.get("type") == "tool_use" and b.get("name") == "Agent" and b.get("id"):
-                inp = b.get("input") or {}
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
                 stats.agent_calls[b["id"]] = {
                     "description": inp.get("description"),
                     "model": inp.get("model"),

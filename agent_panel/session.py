@@ -134,9 +134,10 @@ class Watcher:
             if f.exists():
                 self._read(f, skip_sidechain=False)
             try:
-                metas[aid] = json.loads((sub_dir / f"agent-{aid}.meta.json").read_text())
+                meta = json.loads((sub_dir / f"agent-{aid}.meta.json").read_text())
             except (OSError, ValueError):
-                metas[aid] = {}
+                meta = {}
+            metas[aid] = meta if isinstance(meta, dict) else {}
 
         # toolUseId -> (owner id, call order within that owner's transcript)
         owner: dict[str, tuple[str, int]] = {}

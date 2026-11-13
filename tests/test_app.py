@@ -1,3 +1,4 @@
+import json
 import asyncio
 from pathlib import Path
 
@@ -59,4 +60,34 @@ def test_app_picks_up_session_appearing_later(tmp_path):
             make_session(tmp_path, "late")
             await pilot.pause(1.2)
             assert "opus 5.5" in str(app.query_one("#tree").content)
+    run(go())
+
+
+def test_app_survives_odd_shaped_entries(tmp_path):
+    """Valid JSON in shapes the reader doesn't expect must not kill the poll timer."""
+    make_session(tmp_path, "s1", main_blocks=[agent_call("toolu_1", "audit TUIs")])
+    add_sub(tmp_path, "s1", "a1", "toolu_1", desc="audit TUIs")
+    main = tmp_path / "s1.jsonl"
+    sub_dir = tmp_path / "s1" / "subagents"
+
+    async def go():
+        app = AgentPanelApp(Watcher(tmp_path), Path("/proj/demo"))
+        async with app.run_test(size=(60, 20)) as pilot:
+            await pilot.pause(0.7)
+            odd = [
+                {"type": "assistant", "message": "not an object"},
+                {"type": "assistant", "message": {"id": "x", "usage": None, "content": "text"}},
+                {"type": "assistant", "message": {"id": "y", "usage": {"input_tokens": "lots"}, "content": [None, 3]}},
+                [1, 2, 3],
+                "just a string",
+            ]
+            with open(main, "a") as f:
+                for e in odd:
+                    f.write(json.dumps(e) + "\n")
+            (sub_dir / "agent-a1.meta.json").write_text(json.dumps([1, 2]))
+            await pilot.pause(1.2)
+            assert app.is_running
+            text = str(app.query_one("#tree").content)
+            # Main keeps its burn; the subagent with garbage meta stays listed, falling back to its id.
+            assert "main" in text and "a1" in text
     run(go())

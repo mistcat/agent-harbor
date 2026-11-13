@@ -55,7 +55,10 @@ class AgentPanelApp(App):
         self._timer = self.set_interval(1 / self._fps, self.tick)
 
     def poll(self) -> None:
-        self.snapshot = self.watcher.poll() if self.watcher else None
+        try:
+            self.snapshot = self.watcher.poll() if self.watcher else None
+        except Exception:  # a transcript shape we didn't expect: keep the last view, retry next tick
+            pass
         self.paint()  # first, so the main boat exists to fire from
         if self.snapshot and self.snapshot.new_shots:
             self.fire_shots(self.snapshot.new_shots)
