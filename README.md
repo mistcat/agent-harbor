@@ -49,8 +49,8 @@ Boat size follows token burn (input + cache creation + output, counted once per 
 | Burn | Boat |
 | --- | --- |
 | under 50k | rowboat |
-| 50k to 500k | sloop |
-| 500k and up | galleon |
+| 50k to 300k | sloop |
+| 300k and up | galleon |
 
 Row marks: `✓` done, a spinner for running, `·` idle. A `?` after a label means the subagent could not be matched to a parent call and is shown under main.
 
