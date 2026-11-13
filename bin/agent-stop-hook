@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: tell the controller an agent stopped.
+#
+# Does nothing unless agent-session started this Claude, which sets AGENT_SESSION_NAME and
+# AGENT_SESSION_INBOX. Then writes one file <inbox>/<name>-<epoch> with the agent's name,
+# the time and the first lines of its last message, for `agent-session inbox` to read.
+# Fires on every turn end, so a report means "look at this agent", not necessarily "it
+# finished". Because it no-ops everywhere else, it can be wired once in user-level settings.
+#
+# Never blocks the stop and always exits 0, so it can't re-trigger itself or fail the
+# session. It doesn't skip on stop_hook_active: that flag stays true on the real end of
+# a turn another Stop hook continued, and skipping would lose that report.
+
+[[ -n "${AGENT_SESSION_NAME:-}" && -n "${AGENT_SESSION_INBOX:-}" ]] || exit 0
+
+{
+  input="$(cat)"
+  message="$(jq -r '.last_assistant_message // empty' <<<"$input" | head -n 20)"
+  mkdir -p "$AGENT_SESSION_INBOX" || exit 0
+  file="$AGENT_SESSION_INBOX/$AGENT_SESSION_NAME-$(date +%s)"
+  if [[ -e "$file" ]]; then file="$file.$$"; fi
+  tmp="$AGENT_SESSION_INBOX/.$(basename "$file").tmp"
+  {
+    echo "agent: $AGENT_SESSION_NAME"
+    echo "time:  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    if [[ -n "$message" ]]; then printf '\n%s\n' "$message"; fi
+  } >"$tmp" && mv "$tmp" "$file"
+} 2>/dev/null
+
+exit 0

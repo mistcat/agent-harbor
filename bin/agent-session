@@ -1,0 +1,346 @@
+#!/usr/bin/env bash
+# Spin up an isolated worktree + Rex session for a coding agent, and tear it down.
+#
+#   agent-session new <name> [--branch <existing-branch>] [--prompt <text> | --prompt-file <path>]
+#   agent-session done <name> [--force]
+#   agent-session ls
+#   agent-session peek <name> [lines]
+#   agent-session inbox [--wait] [--timeout <seconds>]
+#   agent-session controller
+#
+# Run it from any git repo. `new` creates ../<repo>-worktrees/<name> (on a new agent/<name>
+# branch off origin/<base>, or on an existing branch), copies the git-ignored files a worktree
+# needs (COPY_FILES, default .env), and opens a Rex session with Agent (claude) and Tests
+# (shell) tabs. <base> is origin's default branch (origin/HEAD), or master if that isn't set.
+#
+# Worktrees isolate the code, not anything the code talks to: a copied .env can hold live
+# keys. Put the rules for that in .agent-session/agent-rules.md and they go into every
+# agent's preamble.
+#
+# `done` closes the Rex session, removes the worktree and deletes the branch if it's
+# merged into the local base branch (the controller merges agent branches locally). It
+# refuses on uncommitted or unmerged work unless --force.
+#
+# The agent's Claude gets AGENT_SESSION_NAME and AGENT_SESSION_INBOX, so the Stop hook
+# (agent-stop-hook) drops a report in the inbox each time the agent stops. The inbox is
+# ${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox (AGENT_SESSION_INBOX
+# overrides). `inbox` prints unread reports, oldest first, and moves them to inbox/read/;
+# `--wait` blocks until there is one (exit 2 after --timeout seconds, default 3600).
+#
+# `peek` prints the last lines of an agent's Agent tab. `controller` opens (or switches to) a
+# Rex session named "<prefix>controller" in the main checkout, running a Claude that
+# coordinates the agents by the practice doc. The controller runs on
+# $AGENT_SESSION_CONTROLLER_MODEL (default sonnet) with the advisor on
+# $AGENT_SESSION_ADVISOR_MODEL (default fable), so its judgment calls get a stronger model.
+#
+# Optional per-project config in <repo>/.agent-session/:
+#   config               sourced bash: PREFIX, COPY_FILES (array), PRACTICE_DOC,
+#                        CONTROLLER_MODEL, ADVISOR_MODEL
+#   agent-rules.md       extra rules inserted into every agent's preamble
+#   controller-rules.md  extra rules appended to the controller's prompt
+set -euo pipefail
+
+# The directory this script really lives in (through symlinks), for the shipped docs.
+HARBOR="${BASH_SOURCE[0]}"
+while [[ -L "$HARBOR" ]]; do
+  link="$(readlink "$HARBOR")"
+  [[ "$link" == /* ]] && HARBOR="$link" || HARBOR="$(dirname "$HARBOR")/$link"
+done
+HARBOR="$(cd "$(dirname "$HARBOR")/.." && pwd)"
+
+ROOT="$(git worktree list --porcelain 2>/dev/null | awk 'NR==1 {print $2}' || true)"
+
+die() { echo "agent-session: $*" >&2; exit 1; }
+
+usage() { sed -n '4,9p' "$0" | sed 's/^# \{0,3\}//'; exit 1; }
+
+valid_name() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,40}$ ]] || die "name must be lowercase letters, digits and dashes: '$1'"; }
+
+load_config() {
+  CONFIG_DIR="$ROOT/.agent-session"
+  # Rex session labels are global across projects, so prefix ours.
+  PREFIX="$(basename "$ROOT")-"
+  COPY_FILES=(.env)
+  PRACTICE_DOC="$HARBOR/docs/controller-practice.md"
+  [[ -f "$ROOT/ai-ops/local-config/agent-sessions.md" ]] && PRACTICE_DOC="ai-ops/local-config/agent-sessions.md"
+  CONTROLLER_MODEL=sonnet
+  ADVISOR_MODEL=fable
+  # shellcheck disable=SC1091
+  if [[ -f "$CONFIG_DIR/config" ]]; then source "$CONFIG_DIR/config"; fi
+  CONTROLLER="${PREFIX}controller"
+  CONTROLLER_MODEL="${AGENT_SESSION_CONTROLLER_MODEL:-$CONTROLLER_MODEL}"
+  ADVISOR_MODEL="${AGENT_SESSION_ADVISOR_MODEL:-$ADVISOR_MODEL}"
+  INBOX="${AGENT_SESSION_INBOX:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${PREFIX%-}/inbox}"
+  WORKTREES="$(dirname "$ROOT")/$(basename "$ROOT")-worktrees"
+  BASE="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  BASE="${BASE#origin/}"
+  BASE="${BASE:-master}"
+}
+
+# Print a config file's text, if the project has it.
+config_text() { if [[ -s "$CONFIG_DIR/$1" ]]; then cat "$CONFIG_DIR/$1"; fi; }
+
+ROLLBACK_WT="" ROLLBACK_BRANCH="" ROLLBACK_SID=""
+rollback() {
+  local status=$?
+  [[ "$status" -ne 0 && -n "$ROLLBACK_WT" ]] || return 0
+  echo "== Setup failed; rolling back" >&2
+  [[ -n "$ROLLBACK_SID" ]] && rex kill "$ROLLBACK_SID" >/dev/null 2>&1
+  git -C "$ROOT" worktree remove --force "$ROLLBACK_WT" || true
+  [[ -n "$ROLLBACK_BRANCH" ]] && git -C "$ROOT" branch -D "$ROLLBACK_BRANCH" >/dev/null 2>&1
+  exit "$status"
+}
+trap rollback EXIT
+
+rex_session_id() { # rex_session_id <label>
+  rex ls --json | jq -r --arg l "$1" '.sessions[] | select(.label == $l) | .session_id' | head -1
+}
+
+# Pass the launching profile through so an agent runs under the same Claude account as
+# whoever started it; Rex panes don't run ~/.zshrc or direnv.
+CLAUDE_ENV=(env CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
+
+preamble() { # preamble <worktree> <branch>
+  cat <<EOF
+You are working in an isolated git worktree. Before anything else, run \`pwd\` and
+\`git branch --show-current\` and confirm they are $1 and $2. Every edit,
+command and commit happens in this directory, never in $ROOT.
+
+EOF
+  config_text agent-rules.md
+  cat <<EOF
+- Commit with a trailing pathspec. Don't push.
+- When you stop, end with your report as your last message: a Stop hook delivers it to the
+  controller. Never type into another Rex session or pane (the controller's included).
+
+Task:
+EOF
+}
+
+cmd_new() {
+  local name="${1:-}"; [[ -n "$name" ]] || usage; shift
+  local branch="" prompt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --branch) branch="$2"; shift 2 ;;
+      --prompt) prompt="$2"; shift 2 ;;
+      --prompt-file) [[ -s "$2" ]] || die "prompt file missing or empty: $2"; prompt="$(cat "$2")"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  valid_name "$name"
+  command -v rex >/dev/null || die "rex not found"
+  command -v jq >/dev/null || die "jq not found"
+
+  local wt="$WORKTREES/$name"
+  [[ -e "$wt" ]] && die "$wt already exists"
+  [[ -z "$(rex_session_id "$PREFIX$name")" ]] || die "a Rex session named '$PREFIX$name' already exists"
+
+  echo "== Creating worktree $wt"
+  mkdir -p "$WORKTREES"
+  # The local base branch can lag origin (someone else pushed), so fetch first and fail
+  # rather than start from a stale one.
+  if [[ -n "$branch" ]]; then
+    git -C "$ROOT" fetch --quiet origin "$branch" 2>/dev/null || true
+    git -C "$ROOT" worktree add --quiet "$wt" "$branch"
+  else
+    branch="agent/$name"
+    git -C "$ROOT" fetch --quiet origin "$BASE"
+    # --no-track: otherwise the branch's upstream becomes origin/<base> and a bare push goes there.
+    git -C "$ROOT" worktree add --quiet --no-track -b "$branch" "$wt" "origin/$BASE"
+    ROLLBACK_BRANCH="$branch"
+  fi
+  ROLLBACK_WT="$wt"
+
+  echo "== Copying git-ignored files"
+  local f
+  for f in ${COPY_FILES[@]+"${COPY_FILES[@]}"}; do
+    if [[ -f "$ROOT/$f" ]]; then
+      mkdir -p "$(dirname "$wt/$f")"
+      cp "$ROOT/$f" "$wt/$f"
+    fi
+  done
+  command -v direnv >/dev/null && direnv allow "$wt" >/dev/null 2>&1 || true
+
+  echo "== Opening Rex session '$PREFIX$name'"
+  local sid
+  local agent=("${CLAUDE_ENV[@]}" AGENT_SESSION_NAME="$name" AGENT_SESSION_INBOX="$INBOX" claude)
+  if [[ -n "$prompt" ]]; then
+    sid="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}" "$(preamble "$wt" "$branch")
+$prompt" | jq -er '.session_id')"
+  else
+    sid="$(rex new "$PREFIX$name" -c "$wt" --window Agent --json -- "${agent[@]}" | jq -er '.session_id')"
+  fi
+  ROLLBACK_SID="$sid"
+  rex window new -s "$sid" Tests -c "$wt" --focus=false --keep-open --json -- "$SHELL" >/dev/null
+
+  cat <<EOF
+
+Ready.
+  worktree:  $wt
+  branch:    $branch
+  rex:       $sid ($PREFIX$name)
+Tear down with: agent-session done $name
+EOF
+}
+
+cmd_done() {
+  local name="${1:-}"; [[ -n "$name" ]] || usage; shift
+  local force=0
+  [[ "${1:-}" == "--force" ]] && force=1
+  valid_name "$name"
+  local wt="$WORKTREES/$name"
+  [[ -d "$wt" ]] || die "no worktree at $wt"
+
+  local branch
+  branch="$(git -C "$wt" branch --show-current)"
+  if [[ "$force" == 0 ]]; then
+    [[ -z "$(git -C "$wt" status --porcelain)" ]] || die "$wt has uncommitted changes (use --force to discard)"
+    local unmerged
+    unmerged="$(git -C "$ROOT" log --oneline "$BASE..$branch")"
+    [[ -z "$unmerged" ]] || die "$branch has commits that aren't merged into $BASE (use --force to abandon):
+$unmerged"
+  fi
+
+  local sid
+  sid="$(rex_session_id "$PREFIX$name" || true)"
+  if [[ -n "$sid" ]]; then
+    echo "== Closing Rex session $sid"
+    rex kill "$sid" >/dev/null || true
+  fi
+
+  echo "== Removing worktree"
+  git -C "$ROOT" worktree remove --force "$wt"
+  git -C "$ROOT" worktree prune
+  if [[ -n "$branch" && "$branch" != "$BASE" ]]; then
+    git -C "$ROOT" merge-base --is-ancestor "$branch" "$BASE" && git -C "$ROOT" branch -D "$branch" >/dev/null &&
+      echo "== Deleted merged branch $branch" ||
+      echo "== Kept branch $branch (not merged into $BASE)"
+  fi
+}
+
+cmd_ls() {
+  local wt name
+  for wt in "$WORKTREES"/*/; do
+    [[ -d "$wt" ]] || continue
+    name="$(basename "$wt")"
+    printf '%-28s %-36s rex %s\n' "$name" "$(git -C "$wt" branch --show-current)" \
+      "$([[ -n "$(rex_session_id "$PREFIX$name")" ]] && echo open || echo closed)"
+  done
+}
+
+cmd_peek() {
+  local name="${1:-}" lines="${2:-40}" sid
+  [[ -n "$name" ]] || usage
+  sid="$(rex_session_id "$PREFIX$name")"
+  [[ -n "$sid" ]] || die "no Rex session named '$PREFIX$name'"
+  rex capture -s "$sid" -w Agent --trim --unwrap | tail -n "$lines"
+}
+
+inbox_entries() { # unread reports, oldest first (by the <epoch> suffix the hook writes)
+  local f
+  for f in "$INBOX"/*; do
+    if [[ -f "$f" ]]; then echo "${f##*-} $f"; fi
+  done | sort -n | cut -d' ' -f2-
+}
+
+cmd_inbox() {
+  local wait=0 timeout=3600 waited=0 f
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --wait) wait=1; shift ;;
+      --timeout) [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--timeout needs a number of seconds"; timeout="$2"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  if [[ "$wait" == 1 ]]; then
+    while [[ -z "$(inbox_entries)" ]]; do
+      if ((waited >= timeout)); then
+        echo "agent-session: no agent reports after ${timeout}s" >&2
+        exit 2
+      fi
+      sleep 3
+      waited=$((waited + 3))
+    done
+  fi
+  local entries
+  entries="$(inbox_entries)"
+  if [[ -z "$entries" ]]; then
+    echo "no new agent reports"
+    return
+  fi
+  mkdir -p "$INBOX/read"
+  while IFS= read -r f; do
+    echo "== $(basename "$f")"
+    cat "$f"
+    echo
+    mv "$f" "$INBOX/read/"
+  done <<<"$entries"
+}
+
+controller_prompt() {
+  cat <<EOF
+You are the controller for parallel agent sessions on this repo. You run in the main
+checkout ($ROOT) on $BASE. Before anything else:
+
+1. Read $PRACTICE_DOC and follow it for the whole session.
+2. Run \`git status\` and \`agent-session ls\`, then \`agent-session peek <name> 15\`
+   for each open session.
+3. Report a short board: each session, its branch, what it is doing or waiting on, and any
+   overlap between sessions in the files they touch. Then wait for instructions.
+
+While any agent is active, keep exactly one \`agent-session inbox --wait\` running in the
+background; restart it after each wake and peek the agent(s) it names.
+
+You don't write feature or fix code here; you start agents for that.
+
+EOF
+  config_text controller-rules.md
+  cat <<EOF
+Call the advisor before you write a brief or split work between agents, before you merge an
+agent's branch, before you put a live write to the user, and whenever two agents' reports
+conflict.
+EOF
+}
+
+show_in_app() { # show_in_app <session> — bring it up in the first connected Rex app, if any
+  local client
+  client="$(rex client ls --json | jq -r '[.clients[] | select(.info.kind == "app" and .connection_state == "connected")][0].client_id // empty')"
+  [[ -n "$client" ]] && rex -C "$client" do session.select session_id="$1" >/dev/null 2>&1 || true
+}
+
+cmd_controller() {
+  command -v rex >/dev/null || die "rex not found"
+  command -v jq >/dev/null || die "jq not found"
+  local existing
+  existing="$(rex_session_id "$CONTROLLER")"
+  if [[ -n "$existing" ]]; then
+    show_in_app "$existing"
+    echo "Controller already open in Rex session $existing; switched to it."
+    return
+  fi
+  local current
+  current="$(git -C "$ROOT" branch --show-current)"
+  [[ "$current" == "$BASE" ]] || echo "warning: the main checkout is on '$current', not $BASE" >&2
+
+  local sid
+  sid="$(rex new "$CONTROLLER" -c "$ROOT" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$CONTROLLER_MODEL" \
+    --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)" |
+    jq -er '.session_id')"
+  rex window new -s "$sid" Shell -c "$ROOT" --focus=false --keep-open --json -- "$SHELL" >/dev/null
+  show_in_app "$sid"
+  echo "Controller ready in Rex session $sid (tabs: Agent, Shell)."
+}
+
+# Subcommands need a repo; usage doesn't.
+repo_cmd() { [[ -n "$ROOT" ]] || die "not inside a git repository"; load_config; "$@"; }
+
+case "${1:-}" in
+  new) shift; repo_cmd cmd_new "$@" ;;
+  done) shift; repo_cmd cmd_done "$@" ;;
+  ls) shift; repo_cmd cmd_ls "$@" ;;
+  peek) shift; repo_cmd cmd_peek "$@" ;;
+  inbox) shift; repo_cmd cmd_inbox "$@" ;;
+  controller) shift; repo_cmd cmd_controller "$@" ;;
+  *) usage ;;
+esac
