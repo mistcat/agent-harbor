@@ -179,3 +179,49 @@ def test_session_switch_discards_old_agents(tmp_path):
 
 def test_no_session_yet_returns_none(tmp_path):
     assert Watcher(tmp_path).poll() is None
+
+
+# ---- Task 8 step 0: profile fallback when CLAUDE_CONFIG_DIR is unset ----
+from agent_panel.session import resolve_project
+
+
+def profile(home, name, mtime):
+    proj = home / name / "projects" / "-work-demo"
+    make_session(proj, "s1", mtime=mtime)
+    return proj
+
+
+def test_config_dir_fallback_picks_newest_profile(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    profile(tmp_path, ".claude", 1000)
+    newest = profile(tmp_path, ".claude-work", 2000)
+    profile(tmp_path, ".claude-old", 500)
+    assert resolve_project(Path("/work/demo"), home=tmp_path) == newest
+
+
+def test_env_config_dir_wins(tmp_path, monkeypatch):
+    mine = profile(tmp_path, ".claude", 1000)
+    profile(tmp_path, ".claude-work", 2000)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
+    assert resolve_project(Path("/work/demo"), home=tmp_path) == mine
+
+
+def test_explicit_config_dir_beats_env(tmp_path, monkeypatch):
+    profile(tmp_path, ".claude", 1000)
+    work = profile(tmp_path, ".claude-work", 2000)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
+    assert resolve_project(Path("/work/demo"), explicit=tmp_path / ".claude-work", home=tmp_path) == work
+
+
+def test_fallback_with_no_profile_has_the_project(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    assert resolve_project(Path("/work/demo"), home=tmp_path) == tmp_path / ".claude" / "projects" / "-work-demo"
+
+
+def test_watcher_accepts_a_resolver_and_finds_a_late_profile(tmp_path):
+    state = {"dir": tmp_path / "nowhere"}
+    w = Watcher(lambda: state["dir"])
+    assert w.poll() is None
+    state["dir"] = tmp_path / "real"
+    make_session(state["dir"], "late")
+    assert w.poll().session_id == "late"

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,30 @@ def _mtime(p: Path) -> float:
         return 0.0
 
 
+def resolve_project(cwd: Path, explicit: Path | None = None, home: Path | None = None) -> Path:
+    """The project dir to follow (it may not exist yet).
+
+    Order: --config-dir, then $CLAUDE_CONFIG_DIR, then the profile among ~/.claude and ~/.claude-*
+    whose copy of the project has the most recently written transcript. Rex panes don't inherit
+    CLAUDE_CONFIG_DIR, so the fallback is what makes a bare `agent-panel` work there.
+    """
+    if explicit:
+        return slug_dir(cwd, Path(explicit))
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    if env:
+        return slug_dir(cwd, Path(env))
+    home = home or Path.home()
+    best, best_t = None, -1.0
+    for cfg in [home / ".claude", *sorted(home.glob(".claude-*"))]:
+        proj = slug_dir(cwd, cfg)
+        if not proj.is_dir():
+            continue
+        t = max((_mtime(f) for f in proj.glob("*.jsonl")), default=0.0)
+        if t > best_t:
+            best, best_t = proj, t
+    return best or slug_dir(cwd, home / ".claude")
+
+
 def pick_session(proj: Path, current: Path | None, now: float, quiet_s: float = 60) -> Path | None:
     files = list(proj.glob("*.jsonl")) if proj.is_dir() else []
     if not files:
@@ -56,8 +81,9 @@ class Snapshot:
 
 
 class Watcher:
-    def __init__(self, proj: Path, pinned: str | None = None):
-        self.proj = proj
+    def __init__(self, proj: "Path | Callable[[], Path]", pinned: str | None = None):
+        # A callable is re-evaluated each poll, so a project dir that appears later is found.
+        self._proj = proj
         self.pinned = pinned
         self.current: Path | None = None
         self._tails: dict[Path, Tail] = {}
@@ -77,6 +103,7 @@ class Watcher:
 
     def poll(self, now: float | None = None) -> Snapshot | None:
         now = time.time() if now is None else now
+        self.proj = self._proj() if callable(self._proj) else self._proj
         if self.pinned:
             picked = self.proj / f"{self.pinned}.jsonl"
             picked = picked if picked.exists() else None

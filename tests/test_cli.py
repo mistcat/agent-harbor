@@ -20,3 +20,8 @@ def test_parses_session_and_cwd():
 def test_no_sound_flag():
     assert parse_args(["--no-sound"]).no_sound is True
     assert parse_args([]).no_sound is False
+
+
+def test_config_dir_flag():
+    assert parse_args(["--config-dir", "/cfg"]).config_dir == Path("/cfg")
+    assert parse_args([]).config_dir is None
