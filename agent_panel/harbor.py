@@ -116,7 +116,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
     grid[height - 1] = [("~", "dodger_blue3")] * width
     by_id = {a.id: a for a in agents}
     active = active_ids(agents)
-    for b in boats.values():
+    for b in sorted(boats.values(), key=lambda b: b.flagship):  # the flagship last, so a crossing boat can't hide the captain
         a = by_id.get(b.agent_id)
         if a is None:
             continue
@@ -186,8 +186,11 @@ def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say:
 
 
 def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> None:
-    """Move sailing boats; running children follow their parent. Done and idle boats stay put."""
+    """Move sailing boats; running children follow their parent. Done and idle boats stay put.
+    Lead boats (a ship, or a boat whose parent is anchored) turn around when they meet in a lane."""
     active = active_ids(agents)
+    leaders = [boats[a.id] for a in agents if a.id in boats and a.id in active
+               and not (a.parent_id in boats and a.parent_id in active)]
     followers: dict[str, int] = {}
     for a in agents:  # parents come before their children
         b = boats.get(a.id)
@@ -195,7 +198,7 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
             continue
         parent = boats.get(a.parent_id) if a.parent_id else None
         if not parent or a.parent_id not in active:
-            _sail(b, dt, width)
+            _sail(b, dt, width, [o for o in leaders if o is not b and o.lane == b.lane])
             continue
         k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
         w = sprite_width(sprite_key(b.flagship, b.tier))
@@ -207,9 +210,13 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
         b.x = min(max(b.x, 0.0), float(max(width - w, 0)))
 
 
-def _sail(b: Boat, dt: float, width: int) -> None:
+def _sail(b: Boat, dt: float, width: int, lane_leaders: list[Boat] = ()) -> None:
     w = sprite_width(sprite_key(b.flagship, b.tier))
-    b.x += b.direction * SPEED * dt
+    x = b.x + b.direction * SPEED * dt
+    if any(not _apart(x, w, o) and (o.x - b.x) * b.direction > 0 for o in lane_leaders):
+        b.direction = -b.direction  # another lead boat ahead: turn around, as at the harbor's edge
+        return
+    b.x = x
     if b.x > width - w:
         b.x, b.direction = float(max(width - w, 0)), -1
     elif b.x < 0:

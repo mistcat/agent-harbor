@@ -123,7 +123,8 @@ other ship labelled with its worktree folder name, each followed by its own suba
 `· N ships`. A worktree folder named `main` is labelled `main-2`, and two folders with the same name get `-2`, `-3`
 in worktree-list order. Other ships are plain boats (no captain, no Jolly Roger), and their sessions don't raise
 the captain's arm. Only the flagship fires the cannon; its advisor line closes the flagship's rows, before the
-other ships. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship and its flotilla are placed first, then the other ships in worktree-list order.
+other ships. Ships that meet in a lane turn around instead of sailing through each other, and the
+flagship is always drawn on top. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship and its flotilla are placed first, then the other ships in worktree-list order.
 
 Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. Yellow is reserved for the captain's skull. The main ship's sail carries a white Jolly Roger (crossed bones, plus a skull on the bigger sails).
 
