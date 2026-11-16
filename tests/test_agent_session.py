@@ -435,20 +435,49 @@ def test_hook_writes_report_only_when_both_vars_set(world, tmp_path):
     assert "agent: a" in text and "all done" in text
 
 
-def test_hook_defers_to_a_project_hook(world, tmp_path):
-    """A project that wires its own bin/agent-stop-hook gets one report, not two."""
+def project_with_hook(root, settings=None, settings_file="settings.json"):
+    """A project with its own executable bin/agent-stop-hook, a copy of the real one, optionally wired in
+    .claude/<settings_file> with the given Stop command."""
+    (root / "bin").mkdir(parents=True)
+    own = root / "bin" / "agent-stop-hook"
+    shutil.copy(HOOK, own)
+    own.chmod(0o755)
+    if settings is not None:
+        (root / ".claude").mkdir()
+        hooks = {"Stop": [{"hooks": [{"type": "command", "command": settings}]}]}
+        (root / ".claude" / settings_file).write_text(json.dumps({"hooks": hooks}))
+    return own
+
+
+@pytest.mark.parametrize("settings_file", ["settings.json", "settings.local.json"])
+def test_hook_defers_to_a_project_that_wires_its_own_copy(world, tmp_path, settings_file):
+    """A project whose settings run its own bin/agent-stop-hook gets one report, not two."""
     inbox = tmp_path / "hookbox"
     proj = tmp_path / "proj-with-hook"
-    (proj / "bin").mkdir(parents=True)
-    own = proj / "bin" / "agent-stop-hook"
-    own.write_text("#!/usr/bin/env bash\nexit 0\n")
-    own.chmod(0o755)
+    own = project_with_hook(proj, '"$CLAUDE_PROJECT_DIR"/bin/agent-stop-hook', settings_file)
     payload = json.dumps({"last_assistant_message": "x"})
-    vars = dict(AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
-    assert hook(world.env, payload, CLAUDE_PROJECT_DIR=str(proj), **vars).returncode == 0
+    vars = dict(AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox), CLAUDE_PROJECT_DIR=str(proj))
+    assert hook(world.env, payload, **vars).returncode == 0  # the user-level hook stands down
     assert not inbox.exists()
-    assert hook(world.env, payload, CLAUDE_PROJECT_DIR=str(tmp_path / "plain"), **vars).returncode == 0
+    e = {k: v for k, v in world.env.items() if not k.startswith("AGENT_SESSION_")} | vars
+    assert run([str(own)], None, e, input=payload).returncode == 0  # the project's own copy reports
     assert len(list(inbox.iterdir())) == 1
+    assert hook(world.env, payload, **(vars | dict(CLAUDE_PROJECT_DIR=str(tmp_path / "plain")))).returncode == 0
+    assert len(list(inbox.iterdir())) == 2
+
+
+@pytest.mark.parametrize("settings", [None, "command -v agent-stop-hook >/dev/null && agent-stop-hook || true"])
+def test_hook_reports_from_a_worktree_with_an_unwired_copy(world, tmp_path, settings):
+    """An agent-harbor worktree has its own bin/agent-stop-hook, but its settings don't run it (or run only
+    the one on PATH), so the user-level hook is the only one reporting and must not stand down."""
+    inbox = tmp_path / "hookbox"
+    wt = tmp_path / "agent-harbor-worktrees" / "harbor-x"
+    project_with_hook(wt, settings)
+    payload = json.dumps({"last_assistant_message": "report"})
+    r = hook(world.env, payload, AGENT_SESSION_NAME="harbor-x", AGENT_SESSION_INBOX=str(inbox), CLAUDE_PROJECT_DIR=str(wt))
+    assert r.returncode == 0
+    (report,) = list(inbox.iterdir())
+    assert "agent: harbor-x" in report.read_text() and "report" in report.read_text()
 
 
 # --- rexclaude ---------------------------------------------------------------------------

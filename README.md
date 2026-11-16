@@ -205,6 +205,10 @@ started the Claude, so wire it once in your user-level Claude settings:
 }
 ```
 
+A project whose `.claude/settings.json` or `.claude/settings.local.json` runs its own `bin/agent-stop-hook`
+keeps it: the user-level hook stands down there, so each stop reports once. A `bin/agent-stop-hook` that the
+project's settings don't run, such as the one in each of this repo's worktrees, changes nothing.
+
 Reports land in `${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox` (override with
 `AGENT_SESSION_INBOX`); `agent-session inbox` prints and archives them.
 
