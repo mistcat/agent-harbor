@@ -62,7 +62,7 @@ ship of its own, with its own flotilla.
 
 ## Read-only promise
 
-agent-panel only reads transcript files under the Claude config dir. It never writes there, installs hooks, edits settings, sends input to a session or touches the network. The one side effect besides drawing is playing the bundled cannon WAV with `afplay` (turn it off with `--no-sound`).
+agent-panel only reads transcript files under the Claude config dir. It never writes there, installs hooks, edits settings, sends input to a session or touches the network. The only command it runs is `git worktree list`, read-only, every few seconds to find the fleet. The one side effect besides drawing is playing the bundled cannon WAV with `afplay` (turn it off with `--no-sound`).
 
 ## Install
 
