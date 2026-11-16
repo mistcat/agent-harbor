@@ -766,3 +766,19 @@ def test_every_ship_gets_a_label_of_its_own(names):
     labels = ship_labels(ships(*names))
     assert len(set(labels.values())) == len(labels), labels
     assert labels[""] == FLAGSHIP_LABEL and all(0 < len(v) <= 8 for v in labels.values())
+
+
+@pytest.mark.parametrize("names", [("harbor-", "harbor"), ("fix--a", "fix-b"), ("repo:",)])
+def test_a_label_is_never_empty(names):
+    assert all(ship_labels(ships(*names)).values()), ship_labels(ships(*names))
+
+
+def test_hull_height_follows_the_harbors_label_rows_not_the_boats_label_text():
+    from agent_panel.effects import gunport
+    from agent_panel.harbor import hull_row
+    ags = ships("harbor-prune")
+    boats, _ = layout(ags, 100, 17, {})
+    main = boats["main"]
+    assert main.labelled and gunport(main)[1] == (17 - 1) - hull_row(17, 0, True)  # rows above the water
+    bare = Boat("main", 0.0, 0, 1, "rowboat", True, label="", labelled=True)  # however its text came out
+    assert gunport(bare)[1] == gunport(main)[1] and rect(bare, 17, 0)[3] == rect(main, 17, 0)[3]
