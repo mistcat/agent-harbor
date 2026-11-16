@@ -6,6 +6,7 @@ from pathlib import Path
 ASSETS = Path(__file__).parent / "assets"
 WAV = ASSETS / "cannon.wav"
 ATTENTION_WAV = ASSETS / "attention.wav"  # a deeper cannon with a longer tail
+AHOY_WAV = ASSETS / "ahoy.wav"  # a gravelly "Ah-hoy ... may-tee" in the Daniel voice (scripts/make_ahoy.sh)
 AHOY = "Ahoy, matey"
 ATTENTION_GAP_S = 30.0  # the attention call never repeats sooner than this
 SETTLE_S = 6.0  # the call waits this long with nothing running, so a controller about to resume stays quiet
@@ -43,10 +44,13 @@ class Boomer:
 
 
 def attention_player(mode: str, enabled: bool) -> Boomer:
-    """The attention call for --attention-sound: "boom" (attention.wav), "say" (macOS `say`) or "off"."""
+    """The attention call for --attention-sound: "boom" (attention.wav), "ahoy" (ahoy.wav), "say" (macOS `say`)
+    or "off"."""
     on = enabled and mode != "off"
     if mode == "say":
         return Boomer(on, ATTENTION_GAP_S, player="say", args=[AHOY])
+    if mode == "ahoy":
+        return Boomer(on, ATTENTION_GAP_S, wav=AHOY_WAV)
     return Boomer(on, ATTENTION_GAP_S, wav=ATTENTION_WAV)
 
 
