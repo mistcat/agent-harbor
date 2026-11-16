@@ -146,36 +146,56 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
     active = active_ids(agents)
     # The flagship first (the cannon fires from it), then running agents and their leaders, so idle boats
     # can't crowd a running one out. The sort is stable: parents stay before their children.
-    sailors = sorted((a for a in agents if a.id not in moored), key=lambda a: 0 if a.flagship else 1 if a.id in active else 2)
+    def rank(a: Agent) -> int:
+        return 0 if a.flagship else 1 if a.id in active else 2
+
+    sailors = sorted((a for a in agents if a.id not in moored), key=rank)
 
     def allowed(a: Agent) -> list[int]:
         return list(range(lanes)) if a.flagship or lanes == 1 else list(range(1, lanes))
 
-    boats: dict[str, Boat] = {}
-    for a in sailors:
+    def kept(a: Agent) -> Boat | None:
+        """The agent's boat from the last frame, if that position is still legal on its own."""
         old = prev.get(a.id)
         t = tier(a.burn)
         w = sprite_width(sprite_key(a.flagship, t))
-        if (old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w
-                and _clear(old.x, w, old.lane, boats.values())):
-            boats[a.id] = Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
+        if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
+            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
+        return None
+
+    # Tier by tier, each tier keeps its old positions and then places its newcomers before the next tier
+    # is seated, so a boat from an earlier frame can't hold water a higher tier needs. A newcomer prefers a
+    # slot that leaves lower tiers' old positions free and takes one only when there is no other room.
+    tiers = [[a for a in sailors if rank(a) == r] for r in range(3)]
+    olds = {a.id: b for a in sailors if (b := kept(a))}
+    boats: dict[str, Boat] = {}
     siblings: dict[str, int] = {}
-    for a in sailors:
-        if a.id in boats:
-            continue
-        t = tier(a.burn)
-        order = allowed(a)  # lowest lane first
-        parent = boats.get(a.parent_id) if a.parent_id else None
-        if parent:  # siblings fan out over the lanes above their parent, so they never share a lane while one is free
-            above = lanes - 1 - parent.lane
-            pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
-            siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
-            order = [pref] + [l for l in order if l != pref] if pref in order else order
-        w = sprite_width(sprite_key(a.flagship, t))
-        spot = next(((lane, float(s * SLOT_W)) for lane in order for s in range(lane_width(lane, width) // SLOT_W + 1)
-                     if s * SLOT_W + w <= lane_width(lane, width) and _clear(s * SLOT_W, w, lane, boats.values())), None)
-        if spot is not None:
-            boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
+    for n, group in enumerate(tiers):
+        for a in group:
+            b = olds.get(a.id)
+            if b and _clear(b.x, sprite_width(sprite_key(b.flagship, b.tier)), b.lane, boats.values()):
+                boats[a.id] = b
+        later = [olds[a.id] for g in tiers[n + 1:] for a in g if a.id in olds]
+        for a in group:
+            if a.id in boats:
+                continue
+            t = tier(a.burn)
+            order = allowed(a)  # lowest lane first
+            parent = boats.get(a.parent_id) if a.parent_id else None
+            if parent:  # siblings fan out over the lanes above their parent, so they never share a lane while one is free
+                above = lanes - 1 - parent.lane
+                pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
+                siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
+                order = [pref] + [l for l in order if l != pref] if pref in order else order
+            w = sprite_width(sprite_key(a.flagship, t))
+            spot = None
+            for others in ([*boats.values(), *later], list(boats.values())):
+                spot = next(((lane, float(s * SLOT_W)) for lane in order for s in range(lane_width(lane, width) // SLOT_W + 1)
+                             if s * SLOT_W + w <= lane_width(lane, width) and _clear(s * SLOT_W, w, lane, others)), None)
+                if spot is not None:
+                    break
+            if spot is not None:
+                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
     return boats, len(sailors) - len(boats)
 
 
