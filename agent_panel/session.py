@@ -89,6 +89,7 @@ class Snapshot:
     agents: list[Agent]
     new_shots: int
     advisor_model: str | None
+    turn_ended: bool = False  # the flagship's last turn is over: it waits on the user (or a subagent)
 
 
 class Watcher:
@@ -182,7 +183,8 @@ class Watcher:
                 add(aid, depth + 1)
 
         add("main", 1)
-        return Snapshot(main.stem, agents, shots, short_model(main_stats.advisor_model) if main_stats.advisor_model else None)
+        return Snapshot(main.stem, agents, shots, short_model(main_stats.advisor_model) if main_stats.advisor_model else None,
+                        main_stats.turn_ended)
 
     @staticmethod
     def _agent(aid, parent, depth, label, agent_type, stats: FileStats, status, meta_model, linked) -> Agent:

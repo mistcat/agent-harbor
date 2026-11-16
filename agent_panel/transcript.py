@@ -53,6 +53,7 @@ class FileStats:
     agent_calls: dict[str, dict] = field(default_factory=dict)
     seen_ids: set[str] = field(default_factory=set)
     last_entry_at: str | None = None
+    turn_ended: bool = False  # the last assistant message ended the turn and no prompt has come since
 
 
 def _count(v) -> int:
@@ -70,8 +71,11 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
         if ts:
             stats.last_entry_at = ts
         msg = e.get("message")
+        if e.get("type") == "user" and isinstance(msg, dict) and not e.get("isMeta") and _is_prompt(msg.get("content")):
+            stats.turn_ended = False
         if e.get("type") != "assistant" or not isinstance(msg, dict):
             continue
+        stats.turn_ended = msg.get("stop_reason") == "end_turn"
         if msg.get("model"):
             stats.model = msg["model"]
         if e.get("effort"):
@@ -100,6 +104,13 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
                 new_advisor += 1
                 stats.last_advisor_at = ts or stats.last_advisor_at
     return new_advisor
+
+
+def _is_prompt(content) -> bool:
+    """A user entry the person typed, not a tool result coming back."""
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
 
 
 def short_model(model_id: str | None) -> str:

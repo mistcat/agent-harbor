@@ -13,8 +13,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--cwd", type=Path, default=Path.cwd(), help="project directory to follow (default: current)")
     p.add_argument("--config-dir", type=Path, default=None, help="Claude config dir (default: $CLAUDE_CONFIG_DIR, else the newest of ~/.claude*)")
     p.add_argument("--session", help="pin one session id instead of following the newest")
-    p.add_argument("--no-sound", action="store_true", help="don't play the cannon sound on advisor calls")
+    p.add_argument("--no-sound", action="store_true", help="no sounds at all (cannon and attention call)")
     p.add_argument("--no-captain", action="store_true", help="don't draw the pirate captain on the main ship")
+    p.add_argument("--attention-sound", choices=["boom", "say", "off"], default="boom",
+                   help='sound when the main session waits on you: a deep cannon, macOS `say` "Ahoy, matey", or off (default: boom)')
     p.add_argument("--keep-done", type=float, default=KEEP_DONE_S, metavar="SECONDS",
                    help="how long a finished subagent stays on screen (default: %(default)s)")
     return p.parse_args(argv)
@@ -22,12 +24,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     from agent_panel.app import AgentPanelApp
-    from agent_panel.sound import Boomer
+    from agent_panel.sound import Boomer, attention_player
 
     args = parse_args(argv)
     cwd = args.cwd.resolve()
     # The flagship follows --cwd and tolerates a project dir that doesn't exist yet; the repo's other
     # git worktrees each add a ship with its own flotilla.
     watcher = Fleet(cwd, args.config_dir, pinned=args.session)
-    AgentPanelApp(watcher, cwd, Boomer(not args.no_sound), captain=not args.no_captain, keep_done=args.keep_done).run()
+    AgentPanelApp(watcher, cwd, Boomer(not args.no_sound), captain=not args.no_captain, keep_done=args.keep_done,
+                 attention=attention_player(args.attention_sound, not args.no_sound)).run()
     return 0

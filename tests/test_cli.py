@@ -30,3 +30,11 @@ def test_config_dir_flag():
 def test_keep_done_flag():
     assert parse_args(["--keep-done", "30"]).keep_done == 30
     assert parse_args([]).keep_done == 180
+
+
+def test_attention_sound_flag():
+    assert parse_args([]).attention_sound == "boom"
+    assert parse_args(["--attention-sound", "say"]).attention_sound == "say"
+    assert parse_args(["--attention-sound", "off"]).attention_sound == "off"
+    with pytest.raises(SystemExit):
+        parse_args(["--attention-sound", "loud"])

@@ -91,3 +91,25 @@ def test_short_model_two_part_ids():
     # Real transcripts contain ids with no minor version, e.g. claude-opus-5.
     assert short_model("claude-opus-5") == "opus 5"
     assert short_model("claude-sonnet-5") == "sonnet 5"
+
+
+def test_turn_ended_follows_stop_reason_and_prompts():
+    def asst(mid, reason):
+        e = assistant(mid, "claude-opus-5-5", U1)
+        e["message"]["stop_reason"] = reason
+        return e
+
+    def user(content, meta=False):
+        return {"type": "user", "isMeta": meta, "message": {"role": "user", "content": content}}
+
+    s = FileStats()
+    fold(s, [user("hi"), asst("m1", "tool_use")], skip_sidechain=True)
+    assert s.turn_ended is False
+    fold(s, [user([{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]), asst("m2", "end_turn")], skip_sidechain=True)
+    assert s.turn_ended is True
+    fold(s, [user("ok", meta=True)], skip_sidechain=True)
+    assert s.turn_ended is True  # injected meta entries are not prompts
+    fold(s, [user("next question")], skip_sidechain=True)
+    assert s.turn_ended is False
+    fold(s, [asst("m3", "end_turn")], skip_sidechain=True)
+    assert s.turn_ended is True
