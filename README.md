@@ -125,7 +125,7 @@ other ship labelled with its worktree folder name, each followed by its own suba
 in worktree-list order. Other ships are plain boats (no captain, no Jolly Roger), and their sessions don't raise
 the captain's arm. Only the flagship fires the cannon; its advisor line closes the flagship's rows, before the
 other ships. Boats never overlap: one that meets another boat in its lane turns around (a follower holds
-its place instead), and every lane keeps a row of clear water above its tallest boat. The bottom lane is the
+its place instead; a child that shares its leader's lane, as in the top lane, sails on its own), and every lane keeps a row of clear water above its tallest boat. The bottom lane is the
 flagship's own, so nothing sails over the captain or into the cannon's arc; other boats use it only when the
 harbor has a single lane. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More sailing boats than fit show as `+N more` (top right); the flagship is placed first, then every running agent and its leaders, then the rest in tree order.
 
