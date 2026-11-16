@@ -702,13 +702,36 @@ def ships(*names):
     return out
 
 
-def test_ship_labels_use_the_first_word_no_other_ship_shares():
-    assert ship_labels(ships("harbor-prune", "monitoring-queries")) == {"": FLAGSHIP_LABEL, "harbor-prune": "harbor",
-                                                                      "monitoring-queries": "monitor…"}
-    assert ship_labels(ships("harbor-prune", "harbor-labels")) == {"": "Captain", "harbor-prune": "prune",
-                                                                 "harbor-labels": "labels"}
-    assert ship_labels(ships("agent-harbor:harbor-prune"))["agent-harbor:harbor-prune"] == "harbor"  # an --also-repo ship
-    assert ship_labels(ships("harbor", "harbor-prune")) == {"": "Captain", "harbor": "harbor", "harbor-prune": "prune"}
+def test_ship_labels_use_the_ticket_id_or_the_first_word():
+    assert ship_labels(ships("def-127-grading", "feat-255-wizard", "monitoring-queries", "harbor-ahoy")) == {
+        "": FLAGSHIP_LABEL, "def-127-grading": "def-127", "feat-255-wizard": "feat-255",
+        "monitoring-queries": "monitor…", "harbor-ahoy": "harbor"}
+    assert ship_labels(ships("feat-077-x", "def-9"))["feat-077-x"] == "feat-077"  # the digits as written
+    assert ship_labels(ships("def-9"))["def-9"] == "def-9"
+    assert ship_labels(ships("agent-harbor:def-127-grading"))["agent-harbor:def-127-grading"] == "def-127"  # an --also-repo ship
+    assert ship_labels(ships("agent-harbor:harbor-prune"))["agent-harbor:harbor-prune"] == "harbor"
+    assert ship_labels(ships("feat-25519-x"))["feat-25519-x"] == "feat-25…"  # a long id takes the ellipsis cut
+    assert ship_labels(ships("default-ui", "def-x"))["default-ui"] == "default"  # not a ticket id
+    assert ship_labels(ships("default-ui", "def-x"))["def-x"] == "def"
+
+
+def test_ticket_ids_ignore_case():
+    assert ship_labels(ships("DEF-127-Grading", "Feat-255-wizard")) == {
+        "": FLAGSHIP_LABEL, "DEF-127-Grading": "DEF-127", "Feat-255-wizard": "Feat-255"}
+    labels = ship_labels(ships("def-127-a", "DEF-127-b"))
+    assert len({v.lower() for v in labels.values()}) == 3, labels
+
+
+def test_ships_with_the_same_label_are_numbered():
+    assert ship_labels(ships("def-127-a", "def-127-b")) == {"": "Captain", "def-127-a": "def-12-1", "def-127-b": "def-12-2"}
+    assert ship_labels(ships("harbor-prune", "harbor-labels")) == {"": "Captain", "harbor-prune": "harbor-1",
+                                                                 "harbor-labels": "harbor-2"}
+
+
+def test_captain_and_crew_are_reserved():
+    for name in ("crew-x", "crew", "captain-x", "CREW-y"):
+        label = ship_labels(ships(name))[name]
+        assert label.lower() not in ("crew", "captain"), (name, label)
 
 
 def test_long_labels_are_cut_with_an_ellipsis():
@@ -730,13 +753,27 @@ def test_one_ship_has_no_labels_and_the_same_picture():
 def test_each_boat_carries_its_ships_label_under_the_hull():
     ags = ships("harbor-prune")
     boats, _ = layout(ags, 100, 17, {})
-    assert {k: b.label for k, b in boats.items()} == {"main": "Captain", "a1": "Captain",
+    assert {k: b.label for k, b in boats.items()} == {"main": "Captain", "a1": "crew",
                                                      "harbor-prune/main": "harbor", "harbor-prune/a1": "harbor"}
     lines = render_harbor(ags, boats, 100, 17, 0).plain.split("\n")
     for b in boats.values():
         x0, _, _, label_row = rect(b, 17, 0)
         assert lines[label_row][x0:x0 + len(b.label)] == b.label
         assert "\\" in lines[label_row - 1][x0:x0 + 13]  # the hull is right above it
+
+
+def test_the_captains_subagents_are_crew_and_a_crew_worktree_is_not():
+    ags = ships("crew-x") + [ag("a2", "main", 1, status="running")]
+    boats, _ = layout(ags, 100, 30, {})
+    assert boats["main"].label == "Captain" and boats["a1"].label == boats["a2"].label == "crew"
+    assert boats["crew-x/main"].label == boats["crew-x/a1"].label not in ("crew", "Captain")
+    assert all(b.label for b in boats.values())
+
+
+def test_the_captains_docked_subagents_are_named_crew():
+    ags = ships("harbor-prune") + [ag(f"d{i}", "main", 1, status="done") for i in range(2)]
+    lines = render_harbor(ags, {}, 100, 17, 0).plain.split("\n")
+    assert lines[-2][dock_x(100):].split("║")[0].strip() == "crew"
 
 
 def test_narrow_or_short_harbors_drop_the_labels_first():

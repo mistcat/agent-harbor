@@ -1,4 +1,5 @@
 """Pure harbor layout and rendering: agents -> boats -> Rich Text."""
+import re
 from dataclasses import dataclass
 
 from rich.cells import cell_len
@@ -17,6 +18,8 @@ PILE_W = 7  # the widest subagent sprite: the first card of the pile
 LABEL_MAX = 8  # a ship label under a boat, ellipsis included
 LABEL_MIN_W = 50  # narrower harbors drop the labels first
 FLAGSHIP_LABEL = "Captain"
+CREW_LABEL = "crew"  # the flagship's own subagents
+TICKET = re.compile(r"(?:def|feat)-\d+(?=-|$)", re.IGNORECASE)  # a worktree name that starts with a ticket id
 LABEL_STYLE = "dim"
 CAPTAIN_COLOR = "yellow"  # the skull; not used by any model family
 HAT_STYLE = "bold bright_white"
@@ -118,26 +121,24 @@ def hull_row(height: int, lane: int, labelled: bool) -> int:
 
 
 def ship_labels(agents: list[Agent]) -> dict[str, str]:
-    """Each ship's short label: "Captain" for the flagship's; for the others, the first word of the worktree
-    name (after any "<repo>:") that no other ship on screen shares, cut to LABEL_MAX with an ellipsis.
-    Labels are unique, ignoring case, and never read "Captain": ships that would still share one (the same
-    worktree name in two repos, say) get a numbered label instead, e.g. "harbor-1" and "harbor-2"."""
+    """Each ship's short label: "Captain" for the flagship's; for the others, the ticket id the worktree name
+    (after any "<repo>:") starts with, "def-127" or "feat-255", or else the name up to its first "-", cut to
+    LABEL_MAX with an ellipsis. Labels are unique, ignoring case, and never read "Captain" or "crew": ships
+    that would still share one (the same worktree name in two repos, say) get a numbered label instead, e.g.
+    "harbor-1" and "harbor-2"."""
     names = {a.ship: a.ship.rsplit(":", 1)[-1] for a in agents}
-    words = {k: n.split("-") for k, n in names.items() if k}
     full = {}
     for k, name in names.items():
         if not k:
             continue
-        w = words[k]
-        shared = max((next((i for i, (x, y) in enumerate(zip(w, o)) if x != y), min(len(w), len(o)))
-                      for j, o in words.items() if j != k), default=0)
-        full[k] = (w[shared] if shared < len(w) else "") or name or k  # never empty: the word, the name, the key
+        m = TICKET.match(name)
+        full[k] = (m.group(0) if m else name.split("-", 1)[0]) or name or k  # never empty: the word, the name, the key
 
     def cut(label: str) -> str:
         return label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
 
     out = {"": FLAGSHIP_LABEL} if "" in names else {}
-    taken = {FLAGSHIP_LABEL.lower()}
+    taken = {FLAGSHIP_LABEL.lower(), CREW_LABEL}
     groups: dict[str, list[str]] = {}
     for k, label in full.items():
         groups.setdefault(cut(label).lower(), []).append(k)
@@ -155,6 +156,11 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
         out[k] = label
         taken.add(label.lower())
     return {k: out[k] for k in names}
+
+
+def boat_label(a: Agent, names: dict[str, str]) -> str:
+    """The label under an agent's boat: its ship's, except that the flagship's own subagents are its crew."""
+    return CREW_LABEL if names and not a.ship and not a.flagship else names.get(a.ship, "")
 
 
 def labelled(agents: list[Agent], width: int, height: int) -> bool:
@@ -233,7 +239,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         """The agent's boat from the last frame, if that position is still legal on its own."""
         old = prev.get(a.id)
         t = tier(a.burn)
-        label = names.get(a.ship, "")
+        label = boat_label(a, names)
         w = footprint(a.flagship, t, label)
         if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
             return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship, label, lab)
@@ -263,7 +269,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
                 pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
                 siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
                 order = [pref] + [l for l in order if l != pref] if pref in order else order
-            label = names.get(a.ship, "")
+            label = boat_label(a, names)
             w = footprint(a.flagship, t, label)
             spot = None
             for others in ([*boats.values(), *later], list(boats.values())):
@@ -375,7 +381,7 @@ def _draw_dock(grid, moored: list[Agent], room: int, lab: bool = False, names: d
                 if ch != " " and top + dy >= 0 and x0 <= x + dx < px:
                     grid[top + dy][x + dx] = (ch, model_color(a.model) if ch == SAIL else "grey50")
     if lab and shown:
-        text = " ".join(dict.fromkeys((names or {}).get(a.ship, "") for a in shown))
+        text = " ".join(dict.fromkeys(boat_label(a, names or {}) for a in shown))
         if 0 < len(text) <= px - x0:
             for i, ch in enumerate(text):
                 grid[hull_y + 1][px - 1 - len(text) + i + 1] = (ch, LABEL_STYLE)
