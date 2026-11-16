@@ -5,7 +5,7 @@ Coordinates: x in cells, y in cells *above the waterline* (0 = water).
 from dataclasses import dataclass
 
 from agent_panel.boats import sprite_key, sprite_width
-from agent_panel.harbor import LANE_H, Boat
+from agent_panel.harbor import Boat, lane_h
 
 GRAVITY = 0.1
 SPLASH_FRAMES = 4
@@ -27,7 +27,7 @@ def fire(main_boat: Boat, index: int = 0) -> Shot:
     w = sprite_width(sprite_key(main_boat.flagship, main_boat.tier))
     d = main_boat.direction
     x = main_boat.x + w if d > 0 else main_boat.x - 1
-    return Shot(x=x, y=main_boat.lane * LANE_H + 1.5, vx=d * (1.4 + 0.25 * index), vy=0.8 + 0.15 * index)
+    return Shot(x=x, y=_hull_y(main_boat) + 0.5, vx=d * (1.4 + 0.25 * index), vy=0.8 + 0.15 * index)
 
 
 def advance(shots: list[Shot]) -> list[Shot]:
@@ -51,7 +51,12 @@ def advance(shots: list[Shot]) -> list[Shot]:
 def gunport(boat: Boat) -> tuple[int, int]:
     """(x, y above waterline) of the gunport cell."""
     w = sprite_width(sprite_key(boat.flagship, boat.tier))
-    return (int(round(boat.x)) + (w if boat.direction > 0 else -1), boat.lane * LANE_H + 1)
+    return (int(round(boat.x)) + (w if boat.direction > 0 else -1), _hull_y(boat))
+
+
+def _hull_y(boat: Boat) -> int:
+    """The hull's height above the waterline: one more when the harbor shows label rows."""
+    return boat.lane * lane_h(boat.labelled) + 1 + boat.labelled
 
 
 def overlay(grid: list[list[tuple[str, str]]], shots: list[Shot], flash_at: tuple[int, int] | None) -> None:
