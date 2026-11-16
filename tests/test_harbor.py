@@ -782,3 +782,11 @@ def test_hull_height_follows_the_harbors_label_rows_not_the_boats_label_text():
     assert main.labelled and gunport(main)[1] == (17 - 1) - hull_row(17, 0, True)  # rows above the water
     bare = Boat("main", 0.0, 0, 1, "rowboat", True, label="", labelled=True)  # however its text came out
     assert gunport(bare)[1] == gunport(main)[1] and rect(bare, 17, 0)[3] == rect(main, 17, 0)[3]
+
+
+@pytest.mark.parametrize("height", [3, LANE_H])
+def test_no_labels_without_a_lane_so_the_dock_stays_on_the_water(height):
+    ags = ships("harbor-prune") + [ag("d0", "main", 1, status="done")]
+    assert not labelled(ags, 100, height)
+    lines = render_harbor(ags, {}, 100, height, 0).plain.split("\n")
+    assert "\\_" in lines[-2][dock_x(100):]  # the pile's hull sits right on the water row
