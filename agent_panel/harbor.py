@@ -118,20 +118,42 @@ def hull_row(height: int, lane: int, labelled: bool) -> int:
 
 def ship_labels(agents: list[Agent]) -> dict[str, str]:
     """Each ship's short label: "Captain" for the flagship's; for the others, the first word of the worktree
-    name (after any "<repo>:") that no other ship on screen shares, cut to LABEL_MAX with an ellipsis."""
+    name (after any "<repo>:") that no other ship on screen shares, cut to LABEL_MAX with an ellipsis.
+    Labels are unique, ignoring case, and never read "Captain": ships that would still share one (the same
+    worktree name in two repos, say) get a numbered label instead, e.g. "harbor-1" and "harbor-2"."""
     names = {a.ship: a.ship.rsplit(":", 1)[-1] for a in agents}
     words = {k: n.split("-") for k, n in names.items() if k}
-    out = {}
+    full = {}
     for k, name in names.items():
         if not k:
-            out[k] = FLAGSHIP_LABEL
             continue
         w = words[k]
         shared = max((next((i for i, (x, y) in enumerate(zip(w, o)) if x != y), min(len(w), len(o)))
                       for j, o in words.items() if j != k), default=0)
-        label = w[shared] if shared < len(w) else name
-        out[k] = label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
-    return out
+        full[k] = w[shared] if shared < len(w) else name
+
+    def cut(label: str) -> str:
+        return label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
+
+    out = {"": FLAGSHIP_LABEL} if "" in names else {}
+    taken = {FLAGSHIP_LABEL.lower()}
+    groups: dict[str, list[str]] = {}
+    for k, label in full.items():
+        groups.setdefault(cut(label).lower(), []).append(k)
+    clashes = []
+    for low, keys in groups.items():
+        if len(keys) == 1 and low not in taken:
+            out[keys[0]] = cut(full[keys[0]])
+            taken.add(low)
+        else:
+            clashes += keys
+    for k in clashes:
+        n = 1
+        while (label := full[k][:LABEL_MAX - len(f"-{n}")] + f"-{n}").lower() in taken:
+            n += 1
+        out[k] = label
+        taken.add(label.lower())
+    return {k: out[k] for k in names}
 
 
 def labelled(agents: list[Agent], width: int, height: int) -> bool:
