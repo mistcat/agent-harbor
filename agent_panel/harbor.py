@@ -158,11 +158,11 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
 
 
 def labelled(agents: list[Agent], width: int, height: int) -> bool:
-    """Labels show with more than one ship, at LABEL_MIN_W columns and up, and only while their extra row per
-    lane doesn't cost the harbor one of its first two lanes."""
+    """Labels show with more than one ship, at LABEL_MIN_W columns and up, and only while the harbor still has
+    a lane with them and their extra row per lane doesn't cost it one of its first two lanes."""
     lanes, _ = _lanes(width, height)
     return (len({a.ship for a in agents}) > 1 and width >= LABEL_MIN_W
-            and _lanes(width, height, True)[0] >= min(lanes, 2))
+            and _lanes(width, height, True)[0] >= max(1, min(lanes, 2)))
 
 
 def dock_size(width: int) -> tuple[int, int]:
