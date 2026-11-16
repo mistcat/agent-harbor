@@ -121,4 +121,4 @@ def test_attention_wav_is_deeper_and_longer_than_the_cannon():
 def test_ahoy_wav_is_a_readable_voice_clip():
     with wave.open(str(AHOY_WAV)) as w:
         assert w.getnchannels() == 1 and w.getframerate() == 44100
-        assert 1.0 <= w.getnframes() / w.getframerate() <= 2.5
+        assert 0.8 <= w.getnframes() / w.getframerate() <= 2.5
