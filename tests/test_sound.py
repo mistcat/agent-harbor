@@ -27,9 +27,9 @@ from agent_panel.sound import ATTENTION_WAV, Attention, attention_player, waitin
 from tests.test_tree import ag
 
 
-def snap(turn_ended, sub="done", ship_sub="done"):
-    return Snapshot("s1", [ag("main", None, 0, status="idle"), ag("a1", "main", 1, status=sub),
-                           ag("w/main", None, 0, ship="w"), ag("w/a1", "w/main", 1, status=ship_sub, ship="w")],
+def snap(turn_ended, sub="done", ship_sub="done", ship="idle", session="s1"):
+    return Snapshot(session, [ag("main", None, 0, status="idle"), ag("a1", "main", 1, status=sub),
+                              ag("w/main", None, 0, status=ship, ship="w"), ag("w/a1", "w/main", 1, status=ship_sub, ship="w")],
                     0, None, turn_ended)
 
 
@@ -37,7 +37,9 @@ def test_waiting_on_user_needs_an_ended_turn_and_no_running_subagent():
     assert waiting_on_user(snap(True))
     assert not waiting_on_user(snap(False))
     assert not waiting_on_user(snap(True, sub="running"))
-    assert waiting_on_user(snap(True, ship_sub="running"))  # another worktree's subagents are not the controller's
+    # A controller that handed work to the fleet waits on the fleet, not on the user.
+    assert not waiting_on_user(snap(True, ship="running"))
+    assert not waiting_on_user(snap(True, ship_sub="running"))
 
 
 def test_rings_when_the_turn_ends_with_no_subagent_running():
@@ -87,3 +89,9 @@ def test_attention_wav_is_deeper_and_longer_than_the_cannon():
     with wave.open(str(ATTENTION_WAV)) as w, wave.open(str(WAV)) as c:
         assert w.getnchannels() == 1 and w.getframerate() == 22050
         assert w.getnframes() > 1.5 * c.getnframes()
+
+
+def test_a_session_switch_counts_as_a_first_poll():
+    a = Attention()
+    a.update(snap(False, session="old"), 0)
+    assert a.update(snap(True, session="new"), 1) is False  # the newer session was already idle

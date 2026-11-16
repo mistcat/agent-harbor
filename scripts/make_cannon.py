@@ -24,9 +24,9 @@ def deep_cannon(t: float, rng: random.Random) -> float:
     # rumble of low-passed noise that rolls on after the blast.
     f = 38 + 20 * math.exp(-t * 8)
     body = (math.sin(2 * math.pi * f * t) + 0.5 * math.sin(4 * math.pi * f * t)) * math.exp(-t / 0.45)
-    deep_cannon.rumble = 0.97 * deep_cannon.rumble + 0.03 * rng.uniform(-1, 1)
-    blast = rng.uniform(-1, 1) * math.exp(-t / 0.05)
-    return 0.8 * body + 6.0 * deep_cannon.rumble * math.exp(-t / 0.6) + 0.3 * blast
+    deep_cannon.rumble = 0.995 * deep_cannon.rumble + 0.005 * rng.uniform(-1, 1)
+    blast = rng.uniform(-1, 1) * math.exp(-t / 0.03)
+    return body + 12.0 * deep_cannon.rumble * math.exp(-t / 0.6) + 0.25 * blast
 
 
 deep_cannon.rumble = 0.0

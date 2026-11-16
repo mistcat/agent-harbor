@@ -50,8 +50,9 @@ def attention_player(mode: str, enabled: bool) -> Boomer:
 
 
 def waiting_on_user(snap) -> bool:
-    """The flagship's turn has ended and none of its subagents runs: the controller waits on the user."""
-    return snap.turn_ended and not any(a.status == "running" and a.parent_id and not a.ship for a in snap.agents)
+    """The flagship's turn has ended and nothing else runs, no subagent and no other worktree's session:
+    the controller waits on the user, not on its fleet."""
+    return snap.turn_ended and not any(a.status == "running" and not a.flagship for a in snap.agents)
 
 
 class Attention:
@@ -61,8 +62,11 @@ class Attention:
         self.min_gap_s = min_gap_s
         self._was: bool | None = None  # None until the first poll, so an already idle session stays quiet
         self._last: float | None = None
+        self._session: str | None = None
 
     def update(self, snap, now: float) -> bool:
+        if snap.session_id != self._session:  # a different session: its first poll, so an idle one stays quiet
+            self._session, self._was = snap.session_id, None
         waiting = waiting_on_user(snap)
         ring = (self._was is False and waiting
                 and (self._last is None or now - self._last >= self.min_gap_s))
