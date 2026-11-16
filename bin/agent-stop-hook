@@ -13,9 +13,28 @@
 
 [[ -n "${AGENT_SESSION_NAME:-}" && -n "${AGENT_SESSION_INBOX:-}" ]] || exit 0
 # A project that wires its own copy (e.g. bin/agent-stop-hook from before this repo existed)
-# already reports; firing here too would double every report.
-own="${CLAUDE_PROJECT_DIR:-}/bin/agent-stop-hook"
-if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -x "$own" && ! "$own" -ef "${BASH_SOURCE[0]}" ]]; then exit 0; fi
+# already reports; firing here too would double every report. Having the file isn't enough:
+# this repo's own worktrees carry bin/agent-stop-hook without running it. So stand down only
+# when a command under "hooks" in the project's .claude/settings.json or settings.local.json
+# runs some other agent-stop-hook: not a bare `agent-stop-hook` (PATH), not the user-level
+# install at ~/.local/bin, not a path that resolves to this script. Permissions entries and
+# anything else outside "hooks" never count.
+self="${BASH_SOURCE[0]}"
+wired_elsewhere() {
+  local dir="$CLAUDE_PROJECT_DIR" ref
+  for f in "$dir/.claude/settings.json" "$dir/.claude/settings.local.json"; do
+    [[ -f "$f" ]] && jq -r '.hooks? // empty | .. | objects | .command? | strings' "$f"
+  done | tr -d "\"'" | tr -s " \t;&|()<>\`" '\n' | grep -E '(^|/)agent-stop-hook$' |
+    while IFS= read -r ref; do
+      [[ "$ref" == */* && "$ref" != *.local/bin/agent-stop-hook ]] || continue
+      ref="${ref//\$\{CLAUDE_PROJECT_DIR\}/$dir}" ref="${ref//\$CLAUDE_PROJECT_DIR/$dir}"
+      ref="${ref//\$\{HOME\}/$HOME}" ref="${ref//\$HOME/$HOME}"
+      [[ "$ref" == "~/"* ]] && ref="$HOME/${ref#"~/"}"
+      [[ "$ref" == /* ]] || ref="$dir/$ref"
+      [[ -x "$ref" && ! "$ref" -ef "$self" ]] && echo "$ref"
+    done | grep -q .
+}
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && wired_elsewhere 2>/dev/null; then exit 0; fi
 
 {
   input="$(cat)"
