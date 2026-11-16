@@ -635,3 +635,40 @@ def test_a_narrow_harbor_shows_docked_boats_as_a_count():
 def test_lanes_keep_a_row_of_clear_water_between_them():
     for key, sprite in SPRITES.items():
         assert len(sprite) + max(_bob(i, f, sprite) for i in ("a", "b") for f in range(8)) <= LANE_H - 1, key
+
+
+def test_a_new_running_boat_displaces_an_idle_ship_from_an_earlier_frame():
+    # One lane, 30 columns: room for the flagship and one more boat.
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
+             ag("w0/main", None, 0, "w0", status="idle", ship="w0"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "w0/main": Boat("w0/main", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 30, 8, prev)
+    assert set(boats) == {"main", "run"} and over == 1
+
+
+def test_idle_boats_keep_their_place_when_there_is_room():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
+             ag("w0/main", None, 0, "w0", status="idle", ship="w0"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "w0/main": Boat("w0/main", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 60, 8, prev)
+    assert boats["w0/main"].x == 20.0 and "run" in boats and over == 0
+
+
+def test_the_flagship_survives_a_shrink_that_strands_it_behind_idle_boats():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
+            [ag(f"w{i}/main", None, 0, f"w{i}", status="idle", ship=f"w{i}") for i in range(3)]
+    prev = {"main": Boat("main", 30.0, 0, 1, tier(1000), True)}
+    prev |= {f"w{i}/main": Boat(f"w{i}/main", 10.0 * i, 0, 1, tier(1000)) for i in range(3)}
+    boats, over = layout(fleet, 50, 8, prev)  # was 60 columns: the flagship's x=30 is now past the dock
+    assert "main" in boats and over == len(fleet) - len(boats)
+
+
+@pytest.mark.parametrize("width", [30, 50, 100])
+def test_the_flagship_never_overflows_while_another_boat_holds_water(width):
+    r = random.Random(width)
+    for trial in range(50):
+        fleet = [ag("main", None, 0, "main", "opus 5.5", status=r.choice(["idle", "running"]), burn=r.choice([1, 400_000]))]
+        fleet += [ag(f"w{i}/main", None, 0, f"w{i}", status=r.choice(["idle", "running"]), ship=f"w{i}") for i in range(6)]
+        prev = {a.id: Boat(a.id, float(r.randrange(0, width)), 0, 1, tier(a.burn), a.flagship) for a in fleet}
+        boats, _ = layout(fleet, width, 8, prev)
+        assert "main" in boats or not boats, (trial, prev)
