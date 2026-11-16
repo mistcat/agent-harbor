@@ -752,3 +752,17 @@ def test_the_pile_is_named_once_when_the_names_fit():
     ags = ships("harbor-prune") + [ag(f"d{i}", "harbor-prune/main", 1, status="done", ship="harbor-prune") for i in range(2)]
     lines = render_harbor(ags, {}, 100, 17, 0).plain.split("\n")
     assert lines[-2][dock_x(100):].split("║")[0].strip() == "harbor"
+
+
+@pytest.mark.parametrize("names", [
+    ("agent-harbor:harbor-prune", "campaignmonitor-rails:harbor-prune"),
+    ("agent-harbor:harbor-prune", "harbor-prune"),
+    ("harbor-prune", "harbor-labels", "prune-docs"),
+    ("integration-tests", "integrations-ui"),
+    ("monitoring-queries", "monitorings-x"),
+    ("captain", "Captain-x"),
+])
+def test_every_ship_gets_a_label_of_its_own(names):
+    labels = ship_labels(ships(*names))
+    assert len(set(labels.values())) == len(labels), labels
+    assert labels[""] == FLAGSHIP_LABEL and all(0 < len(v) <= 8 for v in labels.values())
