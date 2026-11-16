@@ -42,34 +42,57 @@ def test_waiting_on_user_needs_an_ended_turn_and_no_running_subagent():
     assert not waiting_on_user(snap(True, ship_sub="running"))
 
 
-def test_rings_when_the_turn_ends_with_no_subagent_running():
-    a = Attention()
-    assert a.update(snap(False), 0) is False
-    assert a.update(snap(True), 1) is True
-    assert a.update(snap(True), 2) is False  # still waiting: rings once, not on every poll
+def rings(a, timeline):
+    """Feed (time, snapshot) pairs, polled every half second in between; return the times it rang."""
+    out = []
+    for (t, sn), nxt in zip(timeline, timeline[1:] + [(timeline[-1][0] + 0.5, None)]):
+        while t < nxt[0]:
+            if a.update(sn, t):
+                out.append(t)
+            t += 0.5
+    return out
 
 
-def test_does_not_ring_while_a_subagent_runs_then_rings_when_it_finishes():
-    a = Attention()
-    a.update(snap(False), 0)
-    assert a.update(snap(True, sub="running"), 1) is False
-    assert a.update(snap(True), 2) is True
+def test_happy_path_rings_once_after_the_settle_time_and_not_again_while_waiting():
+    from agent_panel.sound import SETTLE_S
+    assert rings(Attention(), [(0, snap(False)), (10, snap(True)), (200, snap(True))]) == [10 + SETTLE_S]
 
 
-def test_does_not_ring_on_the_first_poll_of_an_idle_session():
-    a = Attention()
-    assert a.update(snap(True), 0) is False
-    assert a.update(snap(True), 100) is False
+def test_a_quiet_background_subagent_rings_at_most_once_per_ended_turn():
+    # The turn ends while a subagent works; its status flaps as it goes quiet (30 s reads "done") and talks.
+    timeline = [(0, snap(False)), (5, snap(True, sub="running"))]
+    for t in range(40, 400, 40):
+        timeline += [(t, snap(True, sub="done")), (t + 10, snap(True, sub="running"))]
+    assert len(rings(Attention(), timeline)) <= 1
 
 
-def test_rate_limit_holds():
+def test_another_worktrees_session_never_arms_the_call():
+    timeline = [(0, snap(True))]  # the flagship was already waiting when the panel started
+    for t in range(10, 300, 20):
+        timeline += [(t, snap(True, ship="running")), (t + 10, snap(True, ship="idle"))]
+    assert rings(Attention(), timeline) == []
+
+
+def test_a_finishing_subagent_does_not_ring_when_the_controller_resumes_within_the_settle_time():
+    from agent_panel.sound import SETTLE_S
+    timeline = [(0, snap(False)), (5, snap(True, sub="running")), (60, snap(True)), (60 + SETTLE_S - 2, snap(False))]
+    assert rings(Attention(), timeline) == []
+
+
+def test_the_rate_limit_defers_a_ring_instead_of_dropping_it():
+    from agent_panel.sound import SETTLE_S
     a = Attention(min_gap_s=30)
-    a.update(snap(False), 0)
-    assert a.update(snap(True), 1) is True
-    a.update(snap(False), 2)
-    assert a.update(snap(True), 10) is False  # 9 s after the last call
-    a.update(snap(False), 40)
-    assert a.update(snap(True), 41) is True
+    got = rings(a, [(0, snap(False)), (1, snap(True)), (1 + SETTLE_S + 1, snap(False)), (12, snap(True)), (100, snap(True))])
+    assert got == [1 + SETTLE_S, 1 + SETTLE_S + 30]  # the second turn's ring waits out the gap, then sounds
+
+
+def test_does_not_ring_on_the_first_poll_of_an_idle_session_or_after_a_switch():
+    assert rings(Attention(), [(0, snap(True)), (100, snap(True))]) == []
+    assert rings(Attention(), [(0, snap(False, session="old")), (1, snap(True, session="new")), (100, snap(True, session="new"))]) == []
+
+
+def test_a_new_turn_cancels_a_pending_ring():
+    assert rings(Attention(), [(0, snap(False)), (1, snap(True)), (2, snap(False)), (100, snap(False))]) == []
 
 
 def test_attention_player_modes():
@@ -89,9 +112,3 @@ def test_attention_wav_is_deeper_and_longer_than_the_cannon():
     with wave.open(str(ATTENTION_WAV)) as w, wave.open(str(WAV)) as c:
         assert w.getnchannels() == 1 and w.getframerate() == 22050
         assert w.getnframes() > 1.5 * c.getnframes()
-
-
-def test_a_session_switch_counts_as_a_first_poll():
-    a = Attention()
-    a.update(snap(False, session="old"), 0)
-    assert a.update(snap(True, session="new"), 1) is False  # the newer session was already idle
