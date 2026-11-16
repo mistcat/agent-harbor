@@ -8,6 +8,7 @@ WAV = ASSETS / "cannon.wav"
 ATTENTION_WAV = ASSETS / "attention.wav"  # a deeper cannon with a longer tail
 AHOY = "Ahoy, matey"
 ATTENTION_GAP_S = 30.0  # the attention call never repeats sooner than this
+SETTLE_S = 6.0  # the call waits this long with nothing running, so a controller about to resume stays quiet
 
 
 class Boomer:
@@ -56,21 +57,39 @@ def waiting_on_user(snap) -> bool:
 
 
 class Attention:
-    """Rings once when the flagship starts waiting on the user. Pure: feed it snapshots and the time."""
+    """Rings at most once per ended turn of the flagship. Pure: feed it snapshots and the time.
 
-    def __init__(self, min_gap_s: float = ATTENTION_GAP_S):
+    Only the flagship's own `turn_ended` going False -> True (a new end_turn) arms the call. Subagents and
+    other worktrees' sessions never arm it; while one runs it only holds a pending ring, because those
+    statuses are quiet-time guesses. The ring sounds once nothing else has run for SETTLE_S, and a new turn
+    starting first cancels it. The gap between rings delays a pending ring; it never drops one."""
+
+    def __init__(self, min_gap_s: float = ATTENTION_GAP_S, settle_s: float = SETTLE_S):
         self.min_gap_s = min_gap_s
-        self._was: bool | None = None  # None until the first poll, so an already idle session stays quiet
-        self._last: float | None = None
+        self.settle_s = settle_s
         self._session: str | None = None
+        self._ended = False
+        self._pending = False
+        self._quiet_since: float | None = None
+        self._last: float | None = None
 
     def update(self, snap, now: float) -> bool:
-        if snap.session_id != self._session:  # a different session: its first poll, so an idle one stays quiet
-            self._session, self._was = snap.session_id, None
-        waiting = waiting_on_user(snap)
-        ring = (self._was is False and waiting
-                and (self._last is None or now - self._last >= self.min_gap_s))
-        self._was = waiting
-        if ring:
-            self._last = now
-        return ring
+        if snap.session_id != self._session:  # a first poll, or a switch: an already idle session stays quiet
+            self._session, self._ended, self._pending = snap.session_id, snap.turn_ended, False
+            return False
+        if snap.turn_ended and not self._ended:
+            self._pending, self._quiet_since = True, None
+        elif not snap.turn_ended:
+            self._pending = False
+        self._ended = snap.turn_ended
+        if not self._pending:
+            return False
+        if not waiting_on_user(snap):
+            self._quiet_since = None
+            return False
+        if self._quiet_since is None:
+            self._quiet_since = now
+        if now - self._quiet_since < self.settle_s or self._last is not None and now - self._last < self.min_gap_s:
+            return False
+        self._pending, self._last = False, now
+        return True
