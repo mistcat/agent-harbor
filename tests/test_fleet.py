@@ -17,14 +17,14 @@ def git(*args, cwd: Path):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def repo_with_worktrees(tmp_path: Path, names=("alpha", "beta")) -> tuple[Path, list[Path]]:
-    root = tmp_path / "repo"
-    root.mkdir()
+def repo_with_worktrees(tmp_path: Path, names=("alpha", "beta"), repo="repo") -> tuple[Path, list[Path]]:
+    root = tmp_path / repo
+    root.mkdir(parents=True)
     git("init", "-q", cwd=root)
     git("commit", "-q", "--allow-empty", "-m", "init", cwd=root)
     wts = []
     for n in names:
-        wt = tmp_path / "repo-worktrees" / n
+        wt = tmp_path / f"{repo}-worktrees" / n
         git("worktree", "add", "-q", "-b", f"agent/{n}", str(wt), cwd=root)
         wts.append(wt.resolve())
     return root.resolve(), wts
@@ -285,3 +285,64 @@ def test_other_ships_are_plain_boats_and_do_not_command_the_captain(tmp_path):
     assert captain_pose(snap.agents, False) == "idle"
     boats, _ = layout(snap.agents, 50, 20, {})
     assert boats["main"].flagship and not boats["alpha/main"].flagship
+
+
+# ---- --also-repo ----
+
+def two_repos(tmp_path):
+    """Repo `repo` (the controller's, worktree alpha) and repo `harbor` (worktrees alpha and prune), each
+    worktree and both main checkouts with a session."""
+    a_root, (a_alpha,) = repo_with_worktrees(tmp_path / "a", names=("alpha",))
+    b_root, (b_alpha, b_prune) = repo_with_worktrees(tmp_path / "b", names=("alpha", "prune"), repo="harbor")
+    cfg = tmp_path / "cfg"
+    for cwd, sid in ((a_root, "ctrl"), (a_alpha, "sa"), (b_root, "harbor-ctrl"), (b_alpha, "sb"), (b_prune, "sp")):
+        flotilla(cfg, cwd, sid)
+    return cfg, a_root, b_root
+
+
+def ship_labels(snap):
+    return [a.label for a in snap.agents if a.parent_id is None]
+
+
+def test_also_repo_adds_that_repos_worktrees_but_not_its_main_checkout(tmp_path):
+    cfg, a_root, b_root = two_repos(tmp_path)
+    snap = Fleet(a_root, cfg, also_repos=[b_root]).poll()
+    assert snap.session_id == "ctrl"
+    # A worktree called alpha in both repos: the other repo's ships carry its name.
+    assert ship_labels(snap) == ["main", "alpha", "harbor:alpha", "harbor:prune"]
+    assert "harbor:prune/a1" in [a.id for a in snap.agents]
+
+
+def test_without_the_flag_the_other_repo_is_not_shown(tmp_path):
+    cfg, a_root, _ = two_repos(tmp_path)
+    assert ship_labels(Fleet(a_root, cfg).poll()) == ["main", "alpha"]
+    assert Fleet(a_root, cfg).poll() == Fleet(a_root, cfg, also_repos=[]).poll()
+
+
+def test_also_repo_from_inside_one_of_its_worktrees_uses_the_main_checkouts_name(tmp_path):
+    cfg, a_root, b_root = two_repos(tmp_path)
+    prune = [p for p in git_worktrees(b_root) if p.name == "prune"][0]
+    assert ship_labels(Fleet(a_root, cfg, also_repos=[prune / "."]).poll())[2:] == ["harbor:alpha", "harbor:prune"]
+
+
+def test_two_also_repos_with_the_same_name_get_a_suffix(tmp_path):
+    me, x, y = tmp_path / "me", tmp_path / "x" / "repo", tmp_path / "y" / "repo"
+    listed = {me: [me], x: [x, tmp_path / "x" / "alpha"], y: [y, tmp_path / "y" / "alpha"]}
+    for p in [*listed[x], *listed[y], me]:
+        p.mkdir(parents=True, exist_ok=True)
+    fleet = Fleet(me, tmp_path / "cfg", list_worktrees=lambda p: listed.get(p, []), also_repos=[x, y])
+    fleet._rescan()
+    assert list(fleet.keys.values()) == ["repo:alpha", "repo:alpha-2"]
+
+
+def test_unreadable_or_non_git_also_repos_are_skipped(tmp_path):
+    cfg, a_root, _ = two_repos(tmp_path)
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    snap = Fleet(a_root, cfg, also_repos=[plain, tmp_path / "missing"]).poll()
+    assert ship_labels(snap) == ["main", "alpha"]
+
+
+def test_also_repo_naming_the_flagships_own_repo_adds_nothing_twice(tmp_path):
+    cfg, a_root, _ = two_repos(tmp_path)
+    assert ship_labels(Fleet(a_root, cfg, also_repos=[a_root]).poll()) == ["main", "alpha"]
