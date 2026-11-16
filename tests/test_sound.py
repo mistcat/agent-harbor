@@ -23,7 +23,7 @@ def test_cannon_wav_valid():
 
 # ---- The attention call ----
 from agent_panel.session import Snapshot
-from agent_panel.sound import ATTENTION_WAV, Attention, attention_player, waiting_on_user
+from agent_panel.sound import AHOY_WAV, ATTENTION_GAP_S, ATTENTION_WAV, Attention, attention_player, waiting_on_user
 from tests.test_tree import ag
 
 
@@ -97,9 +97,13 @@ def test_a_new_turn_cancels_a_pending_ring():
 
 def test_attention_player_modes():
     assert attention_player("boom", True).wav == ATTENTION_WAV and attention_player("boom", True).enabled
+    ahoy = attention_player("ahoy", True)
+    assert ahoy.wav == AHOY_WAV and ahoy.wav.name == "ahoy.wav" and ahoy.wav.exists() and ahoy.enabled
+    assert ahoy.player == "afplay" and ahoy.args is None and ahoy.min_gap_s == ATTENTION_GAP_S
     say = attention_player("say", True)
     assert say.player == "say" and say.args == ["Ahoy, matey"]
     assert not attention_player("off", True).enabled
+    assert not attention_player("ahoy", False).enabled
     assert not attention_player("boom", False).enabled and not attention_player("say", False).enabled  # --no-sound
 
 
@@ -112,3 +116,9 @@ def test_attention_wav_is_deeper_and_longer_than_the_cannon():
     with wave.open(str(ATTENTION_WAV)) as w, wave.open(str(WAV)) as c:
         assert w.getnchannels() == 1 and w.getframerate() == 22050
         assert w.getnframes() > 1.5 * c.getnframes()
+
+
+def test_ahoy_wav_is_a_readable_voice_clip():
+    with wave.open(str(AHOY_WAV)) as w:
+        assert w.getnchannels() == 1 and w.getframerate() == 44100
+        assert 0.8 <= w.getnframes() / w.getframerate() <= 2.5

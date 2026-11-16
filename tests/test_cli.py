@@ -36,6 +36,7 @@ def test_attention_sound_flag():
     assert parse_args([]).attention_sound == "boom"
     assert parse_args(["--attention-sound", "say"]).attention_sound == "say"
     assert parse_args(["--attention-sound", "off"]).attention_sound == "off"
+    assert parse_args(["--attention-sound", "ahoy"]).attention_sound == "ahoy"
     with pytest.raises(SystemExit):
         parse_args(["--attention-sound", "loud"])
 
