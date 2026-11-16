@@ -468,7 +468,7 @@ def test_retire_drops_old_done_keeps_fresh_done():
     fleet = [ag("main", None, 0, status="idle"),
              ag("old", "main", 1, status="done", finished_at=1000.0),
              ag("fresh", "main", 1, status="done", finished_at=1000.0 + 200)]
-    kept, retired = retire(fleet, now=1000.0 + 250, keep_s=120)
+    kept, retired = retire(fleet, now=1000.0 + 250, keep_s=180)
     assert [a.id for a in kept] == ["main", "fresh"] and retired == 1
 
 

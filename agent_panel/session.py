@@ -33,7 +33,7 @@ def project_dir(cwd: Path, cfg: Path) -> Path | None:
 def _epoch(ts: str | None) -> float | None:
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() if ts else None
-    except ValueError:
+    except (ValueError, AttributeError, TypeError):  # a malformed timestamp must not crash poll()
         return None
 
 

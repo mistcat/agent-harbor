@@ -113,7 +113,7 @@ Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-pane
 | `--config-dir PATH` | Claude config dir to read |
 | `--no-sound` | no cannon boom |
 | `--no-captain` | no pirate captain on the main ship |
-| `--keep-done SECONDS` | how long a finished subagent stays on screen (default 120) |
+| `--keep-done SECONDS` | how long a finished subagent stays on screen (default 180) |
 
 Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches. `--session` and `--config-dir` apply to the flagship; each other ship follows its worktree's newest session, in the config dir found the same way (the flag, then `CLAUDE_CONFIG_DIR`, then the newest of `~/.claude*`).
 
@@ -127,7 +127,7 @@ the captain's arm. Only the flagship fires the cannon; its advisor line closes t
 other ships. Ships that meet in a lane turn around instead of sailing through each other, and the
 flagship is always drawn on top. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship is placed first, then every running agent and its leaders, then the rest in tree order, so finished boats never crowd out a running one.
 
-A finished subagent leaves both the tree and the harbor 120 seconds after its last transcript entry (`--keep-done` changes this), and the header counts them, e.g. `· 20 done`. Ships never leave, and neither does a subagent that is running, leads a running one, or has a finished subagent of its own still on screen.
+A finished subagent leaves both the tree and the harbor 180 seconds after its last transcript entry (`--keep-done` changes this), and the header counts them, e.g. `· 20 done`. Ships never leave, and neither does a subagent that is running, leads a running one, or has a finished subagent of its own still on screen.
 
 Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. Yellow is reserved for the captain's skull. The main ship's sail carries a white Jolly Roger (crossed bones, plus a skull on the bigger sails).
 

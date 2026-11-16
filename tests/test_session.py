@@ -265,3 +265,8 @@ def test_done_subagent_without_timestamps_falls_back_to_file_mtime(tmp_path):
     write_jsonl(f, [{"type": "user", "message": {"content": "hi"}}])
     os.utime(f, (5000, 5000))
     assert by_id(Watcher(tmp_path).poll())["a1"].finished_at == 5000
+
+
+def test_malformed_timestamps_do_not_crash_epoch():
+    from agent_panel.session import _epoch
+    assert [_epoch(t) for t in ("not a date", 12345, ["x"], None)] == [None, None, None, None]

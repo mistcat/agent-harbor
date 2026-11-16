@@ -29,4 +29,4 @@ def test_config_dir_flag():
 
 def test_keep_done_flag():
     assert parse_args(["--keep-done", "30"]).keep_done == 30
-    assert parse_args([]).keep_done == 120
+    assert parse_args([]).keep_done == 180

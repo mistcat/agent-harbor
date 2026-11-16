@@ -17,7 +17,7 @@ HAT_STYLE = "bold bright_white"
 CAPTAIN_W = STERN_W
 SKULL = "☠" if cell_len("☠") == 1 else "x"
 CALL_OUT = "Fire!"
-KEEP_DONE_S = 120  # a done subagent leaves the tree and the harbor this long after it finished
+KEEP_DONE_S = 180  # a done subagent leaves the tree and the harbor this long after it finished
 # Captain facing right (stern on the left, flotilla astern); mirrored when sailing left.
 # Rows: tricorn crown, brim with skull, head (and arm), body.
 _HAT = [" ▄▄▄ ", "▀▀" + SKULL + "▀▀"]
