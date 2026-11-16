@@ -454,9 +454,10 @@ def test_flagship_and_captain_drawn_over_a_crossing_ship():
     ags, boats = ships_meeting()
     flag = boats["main"]
     flag.x = 10.0
-    solo = render_harbor(ags[:1], {"main": flag}, 50, 12, 0).plain.split("\n")
+    # 49 columns: no ship labels, so one ship and two ships share the same rows.
+    solo = render_harbor(ags[:1], {"main": flag}, 49, 12, 0).plain.split("\n")
     boats["x/main"].x = 14.0  # its sails sit on the flagship's deck
-    both = render_harbor(ags, boats, 50, 12, 0).plain.split("\n")
+    both = render_harbor(ags, boats, 49, 12, 0).plain.split("\n")
     w = len(SPRITES["main_rowboat"][0])
     cells = [(y, x) for y in range(11) for x in range(10, 10 + w) if solo[y][x] != " "]
     assert cells and all(both[y][x] == solo[y][x] for y, x in cells)
@@ -578,11 +579,15 @@ def crowd(n_subs, ships=3, seed=1):
 
 
 def rect(b, height, frame):
-    """(x0, y0, x1, y1) of the cells a boat's sprite covers in a rendered frame."""
+    """(x0, y0, x1, y1) of the cells a boat covers in a rendered frame: its sprite, and its label row under
+    the hull when it has a label."""
+    from agent_panel.harbor import footprint, hull_row
     sprite = SPRITES[sprite_key(b.flagship, b.tier)]
-    top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - _bob(b.agent_id, frame, sprite)
+    lab = bool(b.label)
+    bob = _bob(b.agent_id, frame, sprite)
+    hull = hull_row(height, b.lane, lab) - bob
     x = int(round(b.x))
-    return x, top, x + len(sprite[0]) - 1, top + len(sprite) - 1
+    return x, hull - len(sprite) + 1, x + footprint(b.flagship, b.tier, b.label) - 1, hull + lab
 
 
 def hits(a, b):
@@ -602,7 +607,7 @@ def test_sailing_boats_never_overlap_each_other_or_the_captain(width, height, n)
         ids = sorted(rects)
         bad = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:] if hits(rects[a], rects[b])]
         assert not bad, f"frame {frame}: {bad}"
-        assert all(r[1] >= 0 for r in rects.values())  # inside the harbor
+        assert all(r[1] >= 0 and r[3] < height - 1 for r in rects.values())  # inside the harbor, above the water
         assert not moored & set(boats)  # finished boats are in the pile, not in open water
         assert over == len(ags) - len(moored) - len(boats)
         for b in boats.values():
@@ -684,3 +689,66 @@ def test_the_docked_and_overflow_counts_never_overwrite_each_other():
         assert top.endswith(f"+{over} more"), (width, top)
         left = top[: width - len(f"+{over} more")]
         assert left.rstrip() in ("", "+10", "+10 docked") and (not left or left.endswith(" ")), (width, top)
+
+
+# ---- Ship labels ----
+from agent_panel.harbor import FLAGSHIP_LABEL, labelled, ship_labels
+
+
+def ships(*names):
+    out = [ag("main", None, 0, "main", status="running"), ag("a1", "main", 1)]
+    for n in names:
+        out += [ag(f"{n}/main", None, 0, n, status="running", ship=n), ag(f"{n}/a1", f"{n}/main", 1, ship=n)]
+    return out
+
+
+def test_ship_labels_use_the_first_word_no_other_ship_shares():
+    assert ship_labels(ships("harbor-prune", "monitoring-queries")) == {"": FLAGSHIP_LABEL, "harbor-prune": "harbor",
+                                                                      "monitoring-queries": "monitor…"}
+    assert ship_labels(ships("harbor-prune", "harbor-labels")) == {"": "Captain", "harbor-prune": "prune",
+                                                                 "harbor-labels": "labels"}
+    assert ship_labels(ships("agent-harbor:harbor-prune"))["agent-harbor:harbor-prune"] == "harbor"  # an --also-repo ship
+    assert ship_labels(ships("harbor", "harbor-prune")) == {"": "Captain", "harbor": "harbor", "harbor-prune": "prune"}
+
+
+def test_long_labels_are_cut_with_an_ellipsis():
+    label = ship_labels(ships("supercalifragilistic"))["supercalifragilistic"]
+    assert label == "superca…" and len(label) == 8
+
+
+def test_one_ship_has_no_labels_and_the_same_picture():
+    ags = ships()
+    assert not labelled(ags, 100, 17)
+    boats, _ = layout(ags, 100, 17, {})
+    assert not any(b.label for b in boats.values())
+    lines = render_harbor(ags, boats, 100, 17, 0).plain.split("\n")
+    assert "Captain" not in "\n".join(lines)
+    hull = rect(boats["main"], 17, 0)[3]  # no label row: the hull's bottom is the boat's bottom
+    assert hull >= 15 - 1 and "\\_" in lines[hull]  # on the water (bob may lift it a row)
+
+
+def test_each_boat_carries_its_ships_label_under_the_hull():
+    ags = ships("harbor-prune")
+    boats, _ = layout(ags, 100, 17, {})
+    assert {k: b.label for k, b in boats.items()} == {"main": "Captain", "a1": "Captain",
+                                                     "harbor-prune/main": "harbor", "harbor-prune/a1": "harbor"}
+    lines = render_harbor(ags, boats, 100, 17, 0).plain.split("\n")
+    for b in boats.values():
+        x0, _, _, label_row = rect(b, 17, 0)
+        assert lines[label_row][x0:x0 + len(b.label)] == b.label
+        assert "\\" in lines[label_row - 1][x0:x0 + 13]  # the hull is right above it
+
+
+def test_narrow_or_short_harbors_drop_the_labels_first():
+    ags = ships("harbor-prune")
+    assert labelled(ags, 50, 17) and not labelled(ags, 49, 17)
+    assert not labelled(ags, 100, 15)  # labels would cost the second lane
+    assert labelled(ags, 100, 30)
+    boats, _ = layout(ags, 49, 17, {})
+    assert "Captain" not in render_harbor(ags, boats, 49, 17, 0).plain
+
+
+def test_the_pile_is_named_once_when_the_names_fit():
+    ags = ships("harbor-prune") + [ag(f"d{i}", "harbor-prune/main", 1, status="done", ship="harbor-prune") for i in range(2)]
+    lines = render_harbor(ags, {}, 100, 17, 0).plain.split("\n")
+    assert lines[-2][dock_x(100):].split("║")[0].strip() == "harbor"

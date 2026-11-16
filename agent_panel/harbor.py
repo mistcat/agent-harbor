@@ -14,6 +14,10 @@ LANE_H = 7  # tallest sprite plus a row of clear water above it
 SLOT_W = 10  # widest sprite plus a gap
 PILE_STEP = 2  # docked boats fan out like a deck of cards, this many columns apart
 PILE_W = 7  # the widest subagent sprite: the first card of the pile
+LABEL_MAX = 8  # a ship label under a boat, ellipsis included
+LABEL_MIN_W = 50  # narrower harbors drop the labels first
+FLAGSHIP_LABEL = "Captain"
+LABEL_STYLE = "dim"
 CAPTAIN_COLOR = "yellow"  # the skull; not used by any model family
 HAT_STYLE = "bold bright_white"
 CAPTAIN_W = STERN_W
@@ -38,6 +42,16 @@ class Boat:
     direction: int
     tier: str
     flagship: bool = False
+    label: str = ""  # the owning ship's name, shown under the hull when there are several ships
+
+
+def footprint(flagship: bool, boat_tier: str, label: str = "") -> int:
+    """Columns a boat takes: its sprite, or its label when that is wider."""
+    return max(sprite_width(sprite_key(flagship, boat_tier)), len(label))
+
+
+def _width(b: Boat) -> int:
+    return footprint(b.flagship, b.tier, b.label)
 
 
 def flagship_boat(boats: dict[str, Boat]) -> Boat | None:
@@ -88,8 +102,44 @@ def _captain_lines(pose: str, direction: int) -> list[str]:
     return lines if direction > 0 else mirror(lines)
 
 
-def _lanes(width: int, height: int) -> tuple[int, int]:
-    return max(0, (height - 1) // LANE_H), max(0, width // SLOT_W)
+def _lanes(width: int, height: int, labelled: bool = False) -> tuple[int, int]:
+    return max(0, (height - 1) // lane_h(labelled)), max(0, width // SLOT_W)
+
+
+def lane_h(labelled: bool) -> int:
+    """A lane's rows: with labels, one more for the label row under the hulls."""
+    return LANE_H + labelled
+
+
+def hull_row(height: int, lane: int, labelled: bool) -> int:
+    """The grid row of a lane's hulls (bob lifts a sprite above it); its label row is the one below."""
+    return (height - 2) - lane * lane_h(labelled) - labelled
+
+
+def ship_labels(agents: list[Agent]) -> dict[str, str]:
+    """Each ship's short label: "Captain" for the flagship's; for the others, the first word of the worktree
+    name (after any "<repo>:") that no other ship on screen shares, cut to LABEL_MAX with an ellipsis."""
+    names = {a.ship: a.ship.rsplit(":", 1)[-1] for a in agents}
+    words = {k: n.split("-") for k, n in names.items() if k}
+    out = {}
+    for k, name in names.items():
+        if not k:
+            out[k] = FLAGSHIP_LABEL
+            continue
+        w = words[k]
+        shared = max((next((i for i, (x, y) in enumerate(zip(w, o)) if x != y), min(len(w), len(o)))
+                      for j, o in words.items() if j != k), default=0)
+        label = w[shared] if shared < len(w) else name
+        out[k] = label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
+    return out
+
+
+def labelled(agents: list[Agent], width: int, height: int) -> bool:
+    """Labels show with more than one ship, at LABEL_MIN_W columns and up, and only while their extra row per
+    lane doesn't cost the harbor one of its first two lanes."""
+    lanes, _ = _lanes(width, height)
+    return (len({a.ship for a in agents}) > 1 and width >= LABEL_MIN_W
+            and _lanes(width, height, True)[0] >= min(lanes, 2))
 
 
 def dock_size(width: int) -> tuple[int, int]:
@@ -120,9 +170,9 @@ def docked(agents: list[Agent]) -> list[Agent]:
 
 
 def _apart(x: float, w: int, other: Boat) -> bool:
-    """Whether a boat of width w at x clears `other` by at least a cell."""
-    ow = sprite_width(sprite_key(other.flagship, other.tier))
-    return x + w < other.x or other.x + ow < x
+    """Whether a boat of width w at x clears `other` (its sprite and its label) by a blank cell, also after
+    both positions are rounded to whole cells."""
+    return x + w + 1 < other.x or other.x + _width(other) + 1 < x
 
 
 def _clear(x: float, w: int, lane: int, boats, skip: Boat | None = None) -> bool:
@@ -141,7 +191,9 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
     """Place one boat per sailing agent, keeping earlier positions. Finished subagents dock instead (see
     `docked`). Lane 0 is the flagship's (and the dock's) unless it is the only lane. No two boats in a lane
     ever overlap: an agent with no room left joins the overflow count. Returns (boats, overflow count)."""
-    lanes, _ = _lanes(width, height)
+    lab = labelled(agents, width, height)
+    names = ship_labels(agents) if lab else {}
+    lanes, _ = _lanes(width, height, lab)
     moored = {a.id for a in docked(agents)}
     active = active_ids(agents)
     # The flagship first (the cannon fires from it), then running agents and their leaders, so idle boats
@@ -158,9 +210,10 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         """The agent's boat from the last frame, if that position is still legal on its own."""
         old = prev.get(a.id)
         t = tier(a.burn)
-        w = sprite_width(sprite_key(a.flagship, t))
+        label = names.get(a.ship, "")
+        w = footprint(a.flagship, t, label)
         if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
-            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
+            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship, label)
         return None
 
     # Tier by tier, each tier keeps its old positions and then places its newcomers before the next tier
@@ -173,7 +226,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
     for n, group in enumerate(tiers):
         for a in group:
             b = olds.get(a.id)
-            if b and _clear(b.x, sprite_width(sprite_key(b.flagship, b.tier)), b.lane, boats.values()):
+            if b and _clear(b.x, _width(b), b.lane, boats.values()):
                 boats[a.id] = b
         later = [olds[a.id] for g in tiers[n + 1:] for a in g if a.id in olds]
         for a in group:
@@ -187,7 +240,8 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
                 pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
                 siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
                 order = [pref] + [l for l in order if l != pref] if pref in order else order
-            w = sprite_width(sprite_key(a.flagship, t))
+            label = names.get(a.ship, "")
+            w = footprint(a.flagship, t, label)
             spot = None
             for others in ([*boats.values(), *later], list(boats.values())):
                 spot = next(((lane, float(s * SLOT_W)) for lane in order for s in range(lane_width(lane, width) // SLOT_W + 1)
@@ -195,7 +249,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
                 if spot is not None:
                     break
             if spot is not None:
-                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
+                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship, label)
     return boats, len(sailors) - len(boats)
 
 
@@ -206,6 +260,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
     grid[height - 1] = [("~", "dodger_blue3")] * width
     by_id = {a.id: a for a in agents}
     active = active_ids(agents)
+    lab = labelled(agents, width, height)
     for b in sorted(boats.values(), key=lambda b: b.flagship):  # the flagship last, so a crossing boat can't hide the captain
         a = by_id.get(b.agent_id)
         if a is None:
@@ -213,8 +268,13 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         key = sprite_key(b.flagship, b.tier)
         sprite = SPRITES[key] if b.direction > 0 or not b.flagship else mirror(SPRITES[key])
         bob = _bob(b.agent_id, frame, sprite)
-        top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - bob  # lane 0 sits on the water
+        top = hull_row(height, b.lane, lab) - len(sprite) + 1 - bob  # lane 0 sits on the water (or on its labels)
         x0 = int(round(b.x))
+        if lab and b.label:  # under the hull, bobbing with it
+            y = hull_row(height, b.lane, lab) + 1 - bob
+            for i, ch in enumerate(b.label):
+                if 0 <= y < height - 1 and 0 <= x0 + i < width:
+                    grid[y][x0 + i] = (ch, LABEL_STYLE)
         for dy, line in enumerate(sprite):
             y = top + dy
             for dx, ch in enumerate(line):
@@ -236,7 +296,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
                     grid[top - 1][zx + i] = (ch, "grey50")
     over = len(agents) - len(docked(agents)) - len(boats)
     more = f"+{over} more"[:width] if over > 0 else ""
-    _draw_dock(grid, docked(agents), width - len(more) - 1 if more else width)
+    _draw_dock(grid, docked(agents), width - len(more) - 1 if more else width, lab, ship_labels(agents) if lab else {})
     if shots or flash:
         from agent_panel.effects import gunport, overlay  # effects imports Boat from here
 
@@ -258,10 +318,11 @@ def _bob(agent_id: str, frame: int, sprite: list[str]) -> int:
     return ((frame // 4) + sum(map(ord, agent_id))) % 2 if len(sprite) <= LANE_H - 2 else 0
 
 
-def _draw_dock(grid, moored: list[Agent], room: int) -> None:
+def _draw_dock(grid, moored: list[Agent], room: int, lab: bool = False, names: dict[str, str] | None = None) -> None:
     """The pier at the right end of lane 0, with the newest finished boats fanned against it like a deck of
     cards and a count of the ones that don't fit. Below 40 columns only the count is shown, top left, in at
-    most `room` columns (the overflow count holds the right end of that row): shortened to "+N", or dropped."""
+    most `room` columns (the overflow count holds the right end of that row): shortened to "+N", or dropped.
+    With labels, the pile's ships are named once under it when the names fit."""
     height, width = len(grid), len(grid[0])
     cards, pier = dock_size(width)
     hidden = len(moored) - min(len(moored), cards)
@@ -271,7 +332,7 @@ def _draw_dock(grid, moored: list[Agent], room: int) -> None:
             for i, ch in enumerate(text):
                 grid[0][i] = (ch, "green")
         return
-    hull_y = height - 2
+    hull_y = hull_row(height, 0, lab)
     x0 = dock_x(width)
     px = width - pier
     if hull_y < 1:
@@ -279,7 +340,8 @@ def _draw_dock(grid, moored: list[Agent], room: int) -> None:
     for x in range(px, width):  # the planks, on posts that stand in the water
         grid[hull_y][x] = ("╤" if (x - px) % 3 == 0 else "═", "tan")
         if (x - px) % 3 == 0:
-            grid[height - 1][x] = ("║", "tan")
+            for y in range(hull_y + 1, height):
+                grid[y][x] = ("║", "tan")
     shown = moored[len(moored) - min(len(moored), cards):]
     for i, a in enumerate(shown):  # oldest first, so the newest lies on top
         sprite = SPRITES[tier(a.burn)]
@@ -289,6 +351,11 @@ def _draw_dock(grid, moored: list[Agent], room: int) -> None:
             for dx, ch in enumerate(line):
                 if ch != " " and top + dy >= 0 and x0 <= x + dx < px:
                     grid[top + dy][x + dx] = (ch, model_color(a.model) if ch == SAIL else "grey50")
+    if lab and shown:
+        text = " ".join(dict.fromkeys((names or {}).get(a.ship, "") for a in shown))
+        if 0 < len(text) <= px - x0:
+            for i, ch in enumerate(text):
+                grid[hull_y + 1][px - 1 - len(text) + i + 1] = (ch, LABEL_STYLE)
     if hidden:
         label = f"+{hidden}"[:pier]
         for i, ch in enumerate(label):
@@ -337,9 +404,9 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
             by_parent.setdefault(a.parent_id, []).append(b)
     for pid, kids in by_parent.items():
         parent = boats[pid]
-        lead = max(sprite_width(sprite_key(parent.flagship, parent.tier)) - SLOT_W, 0)  # a long flagship
+        lead = max(_width(parent) - SLOT_W, 0)  # a long flagship
         for k, b in enumerate(sorted(kids, key=lambda b: -b.x * parent.direction), start=1):
-            w = sprite_width(sprite_key(b.flagship, b.tier))
+            w = _width(b)
             b.direction = parent.direction
             target = parent.x - parent.direction * SLOT_W * k + (lead if parent.direction < 0 else 0)
             room = lane_width(b.lane, width) - w
@@ -351,7 +418,7 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
 
 
 def _sail(b: Boat, dt: float, room: int, others) -> None:
-    w = sprite_width(sprite_key(b.flagship, b.tier))
+    w = _width(b)
     x = b.x + b.direction * SPEED * dt
     if x > room - w:
         x, turn = float(max(room - w, 0)), True
