@@ -8,6 +8,7 @@ from textual.widgets import Static
 from agent_panel.effects import FLASH_FRAMES, Shot, advance, fire
 from agent_panel.harbor import Boat, layout, render_harbor, step
 from agent_panel.model import Agent
+from agent_panel.fleet import Fleet
 from agent_panel.session import Snapshot, Watcher
 from agent_panel.sound import Boomer
 from agent_panel.tree import render_tree
@@ -28,7 +29,7 @@ class AgentPanelApp(App):
     #harbor { height: 1fr; }
     """
 
-    def __init__(self, watcher: Watcher | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True):
+    def __init__(self, watcher: Watcher | Fleet | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True):
         super().__init__()
         self.captain = captain
         self.boomer = boomer if boomer is not None else Boomer(True)
@@ -99,7 +100,9 @@ class AgentPanelApp(App):
             self._show(tree, Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
             self.query_one("#harbor", Static).display = False
             return
-        header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}")
+        ships = sum(a.parent_id is None for a in snap.agents)
+        fleet = f" · {ships} ships" if ships > 1 else ""
+        header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}")
         width = tree.size.width or self.size.width
         rendered = render_tree(snap.agents, width, self.frame, snap.advisor_model)
         self._show(tree, rendered)

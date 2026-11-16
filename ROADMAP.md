@@ -4,7 +4,6 @@ Nothing queued. See Later.
 
 ## Later
 
-- Watch several Claude sessions at once: the whole fleet a controller is running.
 - Switch the crm repo from its own copy of `bin/agent-session` to the shared one here (copy `examples/crm/.agent-session/`).
 
 ## Known minor issues
@@ -18,3 +17,7 @@ From the final review on 2026-11-13, not yet fixed:
 - The header re-lays out every tick (skips the unchanged-update cache).
 - Dead code: `FileStats.last_entry_at`; `config_dir()`/`project_dir()` are unused outside tests.
 - README doesn't mention quitting (ctrl+q) or that `cache_read` is collected but not shown.
+
+## Done
+
+- Watch several Claude sessions at once: the whole fleet a controller is running (agent-panel follows every worktree of the repo).

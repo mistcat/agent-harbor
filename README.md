@@ -52,7 +52,9 @@ run when you type `rexclaude`.
 
 ## agent-panel
 
-A live, read-only terminal panel for a Rex pane. It follows a Claude Code session and shows its agents twice:
+A live, read-only terminal panel for a Rex pane. It follows a Claude Code session and shows its agents twice. Beside
+an `agent-session` controller it shows the whole fleet: every other worktree's session sails in the same harbor as a
+ship of its own, with its own flotilla.
 
 - **Top, the tree:** one row per agent, nested by parent, with model, effort, token burn and status.
 - **Bottom, the harbor:** the same agents as boats on the water. Running boats sail with a wake, finished ones anchor and snooze, children sail behind their parent as a flotilla. An advisor call makes the main ship fire a cannon, with a sound.
@@ -92,6 +94,14 @@ rex split -s "$REX_SESSION" -b "$REX_BLOCK" --split=right --ratio 35 --label Age
 
 Run it from the project directory you are working in, or pass `--cwd`.
 
+**The fleet.** That directory's session is the flagship (the one with the captain). If it is in a git repo,
+agent-panel also runs `git worktree list` every few seconds and follows the newest session in each other worktree
+of the repo, the main checkout included: beside the controller you see every agent, beside an agent you see the
+controller and the other agents. Worktrees appear and leave as `agent-session new` and `done` add and remove them;
+a worktree with no Claude session yet adds nothing. Outside a git repo, or in a repo with no other worktrees (a
+`--solo` session, say), it shows the one session exactly as before. Reading the worktree list is the only command
+it runs; the read-only promise is unchanged.
+
 Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-panel looks in `~/.claude` and every `~/.claude-*` folder and follows the one whose copy of the project has the most recently written transcript. Pin one with `--config-dir PATH`; an explicit `--config-dir` beats the environment variable, which beats the search.
 
 ## Options
@@ -104,11 +114,14 @@ Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-pane
 | `--no-sound` | no cannon boom |
 | `--no-captain` | no pirate captain on the main ship |
 
-Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches.
+Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches. `--session` and `--config-dir` apply to the flagship; each other ship follows its worktree's newest session, in the config dir found the same way (the flag, then `CLAUDE_CONFIG_DIR`, then the newest of `~/.claude*`).
 
 ## Reading the display
 
-Works at 50 columns. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`.
+Works at 50 columns. With a fleet the tree has one top-level row per ship: the flagship first as `main`, then each
+other ship labelled with its worktree folder name, each followed by its own subagents, and the header adds
+`· N ships`. Other ships are plain boats (no captain, no Jolly Roger) and only the flagship fires the cannon or
+shows the advisor line. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship and its flotilla are placed first, then the other ships in worktree-list order.
 
 Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. Yellow is reserved for the captain's skull. The main ship's sail carries a white Jolly Roger (crossed bones, plus a skull on the bigger sails).
 
