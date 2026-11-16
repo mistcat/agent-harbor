@@ -270,3 +270,12 @@ def test_done_subagent_without_timestamps_falls_back_to_file_mtime(tmp_path):
 def test_malformed_timestamps_do_not_crash_epoch():
     from agent_panel.session import _epoch
     assert [_epoch(t) for t in ("not a date", 12345, ["x"], None)] == [None, None, None, None]
+
+
+def test_snapshot_reports_the_main_turn_ended(tmp_path):
+    e = assistant("m1", OPUS, U)
+    e["message"]["stop_reason"] = "end_turn"
+    write_jsonl(tmp_path / "sess1.jsonl", [e])
+    assert Watcher(tmp_path).poll().turn_ended is True
+    make_session(tmp_path)  # its one message has no stop_reason: still mid-turn
+    assert Watcher(tmp_path).poll().turn_ended is False

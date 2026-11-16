@@ -10,7 +10,7 @@ from agent_panel.harbor import KEEP_DONE_S, Boat, flagship_boat, layout, render_
 from agent_panel.model import Agent
 from agent_panel.fleet import Fleet
 from agent_panel.session import Snapshot, Watcher
-from agent_panel.sound import Boomer
+from agent_panel.sound import Attention, Boomer
 from agent_panel.tree import render_tree
 
 POLL_S = 0.5
@@ -30,8 +30,10 @@ class AgentPanelApp(App):
     """
 
     def __init__(self, watcher: Watcher | Fleet | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True,
-                 keep_done: float = KEEP_DONE_S):
+                 keep_done: float = KEEP_DONE_S, attention: Boomer | None = None):
         super().__init__()
+        self.attention = Attention()
+        self.attention_player = attention if attention is not None else Boomer(False)
         self.keep_done = keep_done
         self.captain = captain
         self.boomer = boomer if boomer is not None else Boomer(True)
@@ -66,6 +68,8 @@ class AgentPanelApp(App):
         self.paint()  # first, so the main boat exists to fire from
         if self.snapshot and self.snapshot.new_shots:
             self.fire_shots(self.snapshot.new_shots)
+        if self.snapshot and self.attention.update(self.snapshot, time.monotonic()):
+            self.attention_player.boom(time.monotonic())
         self.set_fps(10 if self.shots or self.flash else fps_for(self.snapshot.agents) if self.snapshot else 2)
 
     def set_fps(self, fps: float) -> None:
