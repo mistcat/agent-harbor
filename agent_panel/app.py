@@ -6,7 +6,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Static
 
 from agent_panel.effects import FLASH_FRAMES, Shot, advance, fire
-from agent_panel.harbor import Boat, layout, render_harbor, step
+from agent_panel.harbor import Boat, flagship_boat, layout, render_harbor, step
 from agent_panel.model import Agent
 from agent_panel.fleet import Fleet
 from agent_panel.session import Snapshot, Watcher
@@ -74,7 +74,7 @@ class AgentPanelApp(App):
 
     def fire_shots(self, n: int) -> None:
         """One shot per new advisor call, one boom in total (the Boomer rate-limits anyway)."""
-        main = self.boats.get("main")
+        main = flagship_boat(self.boats)
         if main:
             self.shots += [fire(main, i) for i in range(n)]
             self.flash = FLASH_FRAMES
@@ -100,7 +100,7 @@ class AgentPanelApp(App):
             self._show(tree, Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
             self.query_one("#harbor", Static).display = False
             return
-        ships = sum(a.parent_id is None for a in snap.agents)
+        ships = len({a.ship for a in snap.agents})
         fleet = f" · {ships} ships" if ships > 1 else ""
         header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}")
         width = tree.size.width or self.size.width

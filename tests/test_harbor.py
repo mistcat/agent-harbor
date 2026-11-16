@@ -172,7 +172,7 @@ def test_wake_behind_moving_boat():
 
 
 def test_no_wake_for_anchored_boat():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     boats["d"].x = 30.0
     line = hull_line(boats, done)
@@ -181,7 +181,7 @@ def test_no_wake_for_anchored_boat():
 
 
 def test_anchored_boat_shows_zzz():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     assert "zzz" in render_harbor(done, boats, 60, 10, 0).plain
     run = sailing()
@@ -190,7 +190,7 @@ def test_anchored_boat_shows_zzz():
 
 
 def test_anchored_boat_bobs():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     assert render_harbor(done, boats, 60, 10, 0).plain != render_harbor(done, boats, 60, 10, 4).plain
 
@@ -262,7 +262,7 @@ def test_done_child_stays_anchored_when_parent_sails():
 
 def overlapping_pairs(boats):
     from agent_panel.boats import sprite_key, sprite_width
-    wid = {k: sprite_width(sprite_key(k, b.tier)) for k, b in boats.items()}
+    wid = {k: sprite_width(sprite_key(b.flagship, b.tier)) for k, b in boats.items()}
     ids = sorted(boats)
     return [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
             if boats[a].lane == boats[b].lane

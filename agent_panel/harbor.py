@@ -34,6 +34,11 @@ class Boat:
     lane: int
     direction: int
     tier: str
+    flagship: bool = False
+
+
+def flagship_boat(boats: dict[str, Boat]) -> Boat | None:
+    return next((b for b in boats.values() if b.flagship), None)
 
 
 def active_ids(agents: list[Agent]) -> set[str]:
@@ -50,10 +55,10 @@ def active_ids(agents: list[Agent]) -> set[str]:
 
 
 def captain_pose(agents: list[Agent], flash: bool) -> str:
-    """"firing" during the cannon flash, "commanding" while any subagent runs, else "idle"."""
+    """"firing" during the cannon flash, "commanding" while any of the flagship's subagents runs, else "idle"."""
     if flash:
         return "firing"
-    return "commanding" if any(a.status == "running" and a.id != "main" for a in agents) else "idle"
+    return "commanding" if any(a.status == "running" and a.parent_id and not a.ship for a in agents) else "idle"
 
 
 def _captain_lines(pose: str, direction: int) -> list[str]:
@@ -67,7 +72,7 @@ def _lanes(width: int, height: int) -> tuple[int, int]:
 
 def _apart(x: float, w: int, other: Boat) -> bool:
     """Whether a boat of width w at x clears `other` by at least a cell."""
-    ow = sprite_width(sprite_key(other.agent_id, other.tier))
+    ow = sprite_width(sprite_key(other.flagship, other.tier))
     return x + w < other.x or other.x + ow < x
 
 
@@ -79,9 +84,9 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
     for a in chosen:
         old = prev.get(a.id)
         t = tier(a.burn)
-        w = sprite_width(sprite_key(a.id, t))
+        w = sprite_width(sprite_key(a.flagship, t))
         if old and old.lane < lanes and 0 <= old.x <= width - w:
-            boats[a.id] = Boat(a.id, old.x, old.lane, old.direction, t)
+            boats[a.id] = Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
     siblings: dict[str, int] = {}
     for a in chosen:
         if a.id in boats:
@@ -95,11 +100,11 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
             siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
             order = [pref] + [l for l in order if l != pref]
         for lane in order:
-            w = sprite_width(sprite_key(a.id, t))
+            w = sprite_width(sprite_key(a.flagship, t))
             slot = next((s for s in range(per_lane)
                          if all(b.lane != lane or _apart(s * SLOT_W, w, b) for b in boats.values())), None)
             if slot is not None:
-                boats[a.id] = Boat(a.id, float(slot * SLOT_W), lane, 1, t)
+                boats[a.id] = Boat(a.id, float(slot * SLOT_W), lane, 1, t, a.flagship)
                 break
     return boats, len(agents) - len(boats)
 
@@ -115,8 +120,8 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         a = by_id.get(b.agent_id)
         if a is None:
             continue
-        key = sprite_key(b.agent_id, b.tier)
-        sprite = SPRITES[key] if b.direction > 0 or b.agent_id != "main" else mirror(SPRITES[key])
+        key = sprite_key(b.flagship, b.tier)
+        sprite = SPRITES[key] if b.direction > 0 or not b.flagship else mirror(SPRITES[key])
         bob = ((frame // 4) + sum(map(ord, b.agent_id))) % 2  # bobbing: lift one row on alternate beats
         top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - bob  # lane 0 sits on the water
         x0 = int(round(b.x))
@@ -127,7 +132,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
                 if ch != " " and 0 <= y < height - 1 and 0 <= x < width:
                     grid[y][x] = (ch, model_color(a.model) if ch == SAIL else "bold bright_white" if ch in EMBLEM else "grey70")
         hull_y = top + len(sprite) - 1
-        seated = captain and b.agent_id == "main" and _seat_captain(
+        seated = captain and b.flagship and _seat_captain(
             grid, b, x0, hull_y, len(sprite[0]), height, CALL_OUT if flash else "zzz" if a.id not in active else "", captain_pose(agents, flash))
         if a.id in active:
             for i, ch in enumerate(WAKE):
@@ -142,7 +147,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
     if shots or flash:
         from agent_panel.effects import gunport, overlay  # effects imports Boat from here
 
-        main = boats.get("main")
+        main = flagship_boat(boats)
         overlay(grid, list(shots), gunport(main) if flash and main else None)
     over = len(agents) - len(boats)
     if over > 0:
@@ -193,9 +198,9 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
             _sail(b, dt, width)
             continue
         k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
-        w = sprite_width(sprite_key(b.agent_id, b.tier))
+        w = sprite_width(sprite_key(b.flagship, b.tier))
         b.direction = parent.direction
-        lead = max(sprite_width(sprite_key(parent.agent_id, parent.tier)) - SLOT_W, 0)  # a long flagship
+        lead = max(sprite_width(sprite_key(parent.flagship, parent.tier)) - SLOT_W, 0)  # a long flagship
         target = parent.x - parent.direction * SLOT_W * k + (lead if parent.direction < 0 else 0)
         if 0 <= target <= width - w:  # out of range (leader at an edge): hold, don't pile up
             b.x += (target - b.x) * min(1.0, 4 * dt)
@@ -203,7 +208,7 @@ def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> 
 
 
 def _sail(b: Boat, dt: float, width: int) -> None:
-    w = sprite_width(sprite_key(b.agent_id, b.tier))
+    w = sprite_width(sprite_key(b.flagship, b.tier))
     b.x += b.direction * SPEED * dt
     if b.x > width - w:
         b.x, b.direction = float(max(width - w, 0)), -1

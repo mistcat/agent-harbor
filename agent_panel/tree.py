@@ -94,19 +94,21 @@ def _advisor_line(main: Agent, advisor_model: str | None) -> Text:
 def render_tree(agents: list[Agent], width: int, frame: int, advisor_model: str | None) -> Text:
     width = max(width, 8)
     out = Text(no_wrap=True)
+    main = next((a for a in agents if a.flagship), None)
+    # The advisor line closes the flagship's flotilla, before any other ship's rows.
+    after = max((i for i, a in enumerate(agents) if not a.ship), default=-1)
     for i, a in enumerate(agents):
         sibling_after = False
         for b in agents[i + 1:]:
-            if b.depth < a.depth:
+            if b.depth < a.depth or b.ship != a.ship:
                 break
             if b.depth == a.depth:
                 sibling_after = True
                 break
         out.append_text(_row(a, not sibling_after, width, frame))
         out.append("\n")
-    main = agents[0] if agents else None
-    if main and main.advisor_calls:
-        out.append_text(_advisor_line(main, advisor_model))
-        out.append("\n")
+        if i == after and main and main.advisor_calls:
+            out.append_text(_advisor_line(main, advisor_model))
+            out.append("\n")
     out.rstrip()  # no trailing blank line: widget height must equal the line count
     return out

@@ -13,7 +13,7 @@ from tests.test_session import make_session
 
 
 def test_shot_arcs_and_splashes():
-    shot = fire(Boat("main", 10.0, 0, 1, "sloop"))
+    shot = fire(Boat("main", 10.0, 0, 1, "sloop", True))
     assert shot.vx > 0
     ys, shots, states = [shot.y], [shot], []
     for _ in range(80):
@@ -29,7 +29,7 @@ def test_shot_arcs_and_splashes():
 
 
 def test_shot_leaves_the_left_gunport_when_sailing_left():
-    shot = fire(Boat("main", 30.0, 0, -1, "rowboat"))
+    shot = fire(Boat("main", 30.0, 0, -1, "rowboat", True))
     assert shot.vx < 0 and shot.x < 30
 
 

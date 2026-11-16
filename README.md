@@ -62,7 +62,7 @@ ship of its own, with its own flotilla.
 
 ## Read-only promise
 
-agent-panel only reads transcript files under the Claude config dir. It never writes there, installs hooks, edits settings, sends input to a session or touches the network. The only command it runs is `git worktree list`, read-only, every few seconds to find the fleet. The one side effect besides drawing is playing the bundled cannon WAV with `afplay` (turn it off with `--no-sound`).
+agent-panel only reads transcript files under the Claude config dir. It never writes there, installs hooks, edits settings, sends input to a session or touches the network. It runs two commands: `git worktree list`, read-only, every few seconds to find the fleet, and `afplay` to play the bundled cannon WAV (turn that off with `--no-sound`). Playing the sound is its one side effect besides drawing.
 
 ## Install
 
@@ -99,8 +99,8 @@ agent-panel also runs `git worktree list` every few seconds and follows the newe
 of the repo, the main checkout included: beside the controller you see every agent, beside an agent you see the
 controller and the other agents. Worktrees appear and leave as `agent-session new` and `done` add and remove them;
 a worktree with no Claude session yet adds nothing. Outside a git repo, or in a repo with no other worktrees (a
-`--solo` session, say), it shows the one session exactly as before. Reading the worktree list is the only command
-it runs; the read-only promise is unchanged.
+`--solo` session, say), it shows the one session exactly as before. Reading the worktree list changes nothing; the
+read-only promise is unchanged.
 
 Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-panel looks in `~/.claude` and every `~/.claude-*` folder and follows the one whose copy of the project has the most recently written transcript. Pin one with `--config-dir PATH`; an explicit `--config-dir` beats the environment variable, which beats the search.
 
@@ -120,8 +120,10 @@ Without `--session` it follows the newest session in the project and only switch
 
 Works at 50 columns. With a fleet the tree has one top-level row per ship: the flagship first as `main`, then each
 other ship labelled with its worktree folder name, each followed by its own subagents, and the header adds
-`· N ships`. Other ships are plain boats (no captain, no Jolly Roger) and only the flagship fires the cannon or
-shows the advisor line. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship and its flotilla are placed first, then the other ships in worktree-list order.
+`· N ships`. A worktree folder named `main` is labelled `main-2`, and two folders with the same name get `-2`, `-3`
+in worktree-list order. Other ships are plain boats (no captain, no Jolly Roger), and their sessions don't raise
+the captain's arm. Only the flagship fires the cannon; its advisor line closes the flagship's rows, before the
+other ships. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship and its flotilla are placed first, then the other ships in worktree-list order.
 
 Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. Yellow is reserved for the captain's skull. The main ship's sail carries a white Jolly Roger (crossed bones, plus a skull on the bigger sails).
 

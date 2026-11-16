@@ -2,6 +2,8 @@ import asyncio
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agent_panel.app import AgentPanelApp
 from agent_panel.fleet import Fleet, git_worktrees
 from agent_panel.harbor import layout, render_harbor
@@ -206,3 +208,80 @@ def test_app_header_counts_ships(tmp_path):
             assert "alpha task" in str(app.query_one("#tree").content)
             assert str(app.query_one("#header").content) == "agent-panel · abcdef12 · repo · 2 ships"
     asyncio.run(go())
+
+
+def test_main_is_reserved_for_the_flagship(tmp_path):
+    cfg, root, wt = tmp_path / "cfg", tmp_path / "root", tmp_path / "wts" / "main"
+    for p, sid in ((root, "ctrl"), (wt, "s1")):
+        p.mkdir(parents=True)
+        flotilla(cfg, p, sid)
+    snap = Fleet(root, cfg, list_worktrees=lambda _: [root, wt]).poll()
+    assert [a.label for a in snap.agents if a.parent_id is None] == ["main", "main-2"]
+    assert [a.flagship for a in snap.agents] == [True, False, False, False]
+
+
+def test_ship_keys_do_not_shift_when_a_namesake_starts_a_session(tmp_path):
+    cfg, root = tmp_path / "cfg", tmp_path / "root"
+    a, b = tmp_path / "x" / "same", tmp_path / "y" / "same"
+    for p in (root, a, b):
+        p.mkdir(parents=True)
+    flotilla(cfg, root, "ctrl")
+    flotilla(cfg, b, "s2")  # only the second namesake has a session yet
+    fleet = Fleet(root, cfg, list_worktrees=lambda _: [root, a, b])
+    before = [x.id for x in fleet.poll(now=100).agents if x.ship]
+    flotilla(cfg, a, "s1")
+    after = [x.id for x in fleet.poll(now=106).agents if x.ship]
+    assert before == ["same-2/main", "same-2/a1"]
+    assert after == ["same/main", "same/a1", "same-2/main", "same-2/a1"]
+
+
+def test_cwd_in_another_case_is_still_the_flagship(tmp_path):
+    cfg, root = tmp_path / "cfg", tmp_path / "Root"
+    root.mkdir()
+    flipped = root.parent / "rOOT"
+    if not flipped.exists():
+        pytest.skip("case-sensitive filesystem")
+    flotilla(cfg, root.resolve(), "ctrl")
+    snap = Fleet(root, cfg, list_worktrees=lambda _: [flipped]).poll()
+    assert [a.id for a in snap.agents] == ["main", "a1"]
+
+
+def test_ship_project_dirs_resolve_once_per_scan(tmp_path, monkeypatch):
+    import agent_panel.fleet as fleet_mod
+    cfg, root, wt = tmp_path / "cfg", tmp_path / "root", tmp_path / "wt"
+    for p, sid in ((root, "ctrl"), (wt, "s1")):
+        p.mkdir()
+        flotilla(cfg, p, sid)
+    calls = []
+    real = fleet_mod.resolve_project
+    monkeypatch.setattr(fleet_mod, "resolve_project", lambda p, *a, **k: calls.append(p) or real(p, *a, **k))
+    fleet = Fleet(root, cfg, list_worktrees=lambda _: [root, wt])
+    for t in (100, 100.5, 101, 101.5):
+        fleet.poll(now=t)
+    assert calls.count(wt) == 1
+
+
+def test_advisor_line_closes_the_flagship_flotilla(tmp_path):
+    root, (alpha, _) = repo_with_worktrees(tmp_path)
+    cfg = tmp_path / "cfg"
+    proj = slug_dir(root, cfg)
+    make_session(proj, "ctrl", main_blocks=[agent_call("toolu_1", "ctrl task"), advisor_call()])
+    add_sub(proj, "ctrl", "a1", "toolu_1", desc="ctrl task")
+    flotilla(cfg, alpha, "sa", desc="alpha task")
+    snap = Fleet(root, cfg).poll()
+    ls = render_tree(snap.agents, 50, 0, None).plain.split("\n")
+    adv = next(i for i, l in enumerate(ls) if "advisor" in l)
+    assert "ctrl task" in ls[adv - 1] and "alpha" in ls[adv + 1]
+
+
+def test_other_ships_are_plain_boats_and_do_not_command_the_captain(tmp_path):
+    from agent_panel.harbor import captain_pose
+    root, (alpha, _) = repo_with_worktrees(tmp_path)
+    cfg = tmp_path / "cfg"
+    make_session(slug_dir(root, cfg), "ctrl")
+    make_session(slug_dir(alpha, cfg), "sa")
+    snap = Fleet(root, cfg).poll()
+    assert [(a.id, a.status) for a in snap.agents] == [("main", "running"), ("alpha/main", "running")]
+    assert captain_pose(snap.agents, False) == "idle"
+    boats, _ = layout(snap.agents, 50, 20, {})
+    assert boats["main"].flagship and not boats["alpha/main"].flagship
