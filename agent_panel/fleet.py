@@ -1,4 +1,5 @@
-"""The fleet: the followed session plus the newest session in each of the repo's other git worktrees. Read-only."""
+"""The fleet: the followed session plus the newest session in each of the repo's other git worktrees, and in
+each worktree of any --also-repo. Read-only."""
 import os
 import subprocess
 import time
@@ -40,11 +41,16 @@ def _same(a: Path, b: Path) -> bool:
 
 
 class Fleet:
-    """Same poll() surface as Watcher. The flagship is the `cwd` session; each other worktree adds a ship."""
+    """Same poll() surface as Watcher. The flagship is the `cwd` session; each other worktree adds a ship.
+
+    Each of `also_repos` adds a ship per worktree of that repo, but not its main checkout (where that repo's
+    own controller usually runs). Those ships are labelled `<repo>:<worktree>`, so two repos with a worktree
+    of the same name stay apart; a path that is no git repo, or can't be read, adds nothing."""
 
     def __init__(self, cwd: Path, config_dir: Path | None = None, pinned: str | None = None,
-                 list_worktrees: Callable[[Path], list[Path]] = git_worktrees):
+                 list_worktrees: Callable[[Path], list[Path]] = git_worktrees, also_repos: list[Path] = ()):
         self.cwd = cwd.resolve()
+        self.also_repos = list(also_repos)
         self.config_dir = config_dir
         self.flagship = Watcher(lambda: resolve_project(self.cwd, config_dir, session=pinned), pinned=pinned)
         self._list = list_worktrees
@@ -59,14 +65,20 @@ class Fleet:
         # since a worktree can sit inside the main checkout).
         mine = [self.cwd, *self.cwd.parents]
         own = max((p for p in paths if any(_same(p, c) for c in mine)), key=lambda p: len(p.parts), default=None)
-        paths = [p for p in paths if p != own and p.is_dir()]
-        self.keys = {p: k for p, k in self.keys.items() if p in paths}
+        names = {p: p.name for p in paths if p != own and p.is_dir()}
+        for repo in self.also_repos:
+            main, *worktrees = self._list(repo) or [None]  # git lists the main checkout first
+            for p in worktrees:
+                if p != own and p not in names and p.is_dir():
+                    names[p] = f"{main.name}:{p.name}"
+        paths = list(names)
+        self.keys = {p: k for p, k in self.keys.items() if p in names}
         taken = {"main", *self.keys.values()}
         for p in paths:
             if p not in self.keys:
-                key, n = p.name, 2
+                key, n = names[p], 2
                 while key in taken:
-                    key, n = f"{p.name}-{n}", n + 1
+                    key, n = f"{names[p]}-{n}", n + 1
                 self.keys[p] = key
                 taken.add(key)
         self._projs = {p: resolve_project(p, self.config_dir) for p in paths}
