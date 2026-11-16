@@ -125,7 +125,7 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
     (after any "<repo>:") starts with, "def-127" or "feat-255", or else the name up to its first "-", cut to
     LABEL_MAX with an ellipsis. Labels are unique, ignoring case, and never read "Captain" or "crew": ships
     that would still share one (the same worktree name in two repos, say) get a numbered label instead, e.g.
-    "harbor-1" and "harbor-2"."""
+    "harbor-1" and "harbor-2". A numbered ticket id stays whole, "def-127-1", even past LABEL_MAX."""
     names = {a.ship: a.ship.rsplit(":", 1)[-1] for a in agents}
     full = {}
     for k, name in names.items():
@@ -151,7 +151,7 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
             clashes += keys
     for k in clashes:
         n = 1
-        while (label := full[k][:LABEL_MAX - len(f"-{n}")] + f"-{n}").lower() in taken:
+        while (label := (full[k] if TICKET.fullmatch(full[k]) else full[k][:LABEL_MAX - len(f"-{n}")]) + f"-{n}").lower() in taken:
             n += 1
         out[k] = label
         taken.add(label.lower())
