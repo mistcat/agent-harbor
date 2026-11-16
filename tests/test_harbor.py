@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent_panel.app import AgentPanelApp
 from agent_panel.boats import SPRITES, TIER_GALLEON, TIER_SLOOP, tier
-from agent_panel.harbor import Boat, layout, render_harbor
+from agent_panel.harbor import Boat, layout, render_harbor, step
 from agent_panel.session import Watcher
 from tests.helpers import agent_call
 from tests.test_session import add_sub, make_session
@@ -172,7 +172,7 @@ def test_wake_behind_moving_boat():
 
 
 def test_no_wake_for_anchored_boat():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     boats["d"].x = 30.0
     line = hull_line(boats, done)
@@ -181,7 +181,7 @@ def test_no_wake_for_anchored_boat():
 
 
 def test_anchored_boat_shows_zzz():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     assert "zzz" in render_harbor(done, boats, 60, 10, 0).plain
     run = sailing()
@@ -190,7 +190,7 @@ def test_anchored_boat_shows_zzz():
 
 
 def test_anchored_boat_bobs():
-    done = [ag("d", None, 0, "x", burn=1, status="done")]
+    done = [ag("d", None, 0, "x", burn=1, status="done", ship="other")]  # a plain boat, not the flagship
     boats, _ = layout(done, 60, 10, {})
     assert render_harbor(done, boats, 60, 10, 0).plain != render_harbor(done, boats, 60, 10, 4).plain
 
@@ -262,7 +262,7 @@ def test_done_child_stays_anchored_when_parent_sails():
 
 def overlapping_pairs(boats):
     from agent_panel.boats import sprite_key, sprite_width
-    wid = {k: sprite_width(sprite_key(k, b.tier)) for k, b in boats.items()}
+    wid = {k: sprite_width(sprite_key(b.flagship, b.tier)) for k, b in boats.items()}
     ids = sorted(boats)
     return [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
             if boats[a].lane == boats[b].lane
@@ -426,3 +426,38 @@ def test_jolly_roger_on_main_sail_only():
 def cell_len_ok(ch):
     from rich.cells import cell_len
     return cell_len(ch) == 1
+
+
+def ships_meeting():
+    ags = [ag("main", None, 0, "main", "opus 5.5", burn=1, status="running"),
+           ag("x/main", None, 0, "x", burn=1, status="running", ship="x")]
+    boats = {"main": Boat("main", 2.0, 0, 1, "rowboat", True), "x/main": Boat("x/main", 36.0, 0, -1, "rowboat")}
+    return ags, boats
+
+
+def test_ships_in_a_lane_turn_around_instead_of_crossing():
+    ags, boats = ships_meeting()
+    for _ in range(100):  # 10s at 50 columns: they meet several times
+        step(boats, ags, 0.1, 50)
+        assert not overlapping_pairs(boats)
+    assert boats["main"].x < boats["x/main"].x
+
+
+def test_ships_already_overlapping_separate():
+    ags, boats = ships_meeting()
+    boats["x/main"].x, boats["x/main"].direction = 6.0, 1
+    for _ in range(20):
+        step(boats, ags, 0.1, 50)
+    assert not overlapping_pairs(boats)
+
+
+def test_flagship_and_captain_drawn_over_a_crossing_ship():
+    ags, boats = ships_meeting()
+    flag = boats["main"]
+    flag.x = 10.0
+    solo = render_harbor(ags[:1], {"main": flag}, 50, 12, 0).plain.split("\n")
+    boats["x/main"].x = 14.0  # its sails sit on the flagship's deck
+    both = render_harbor(ags, boats, 50, 12, 0).plain.split("\n")
+    w = len(SPRITES["main_rowboat"][0])
+    cells = [(y, x) for y in range(11) for x in range(10, 10 + w) if solo[y][x] != " "]
+    assert cells and all(both[y][x] == solo[y][x] for y, x in cells)

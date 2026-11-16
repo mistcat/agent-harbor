@@ -17,3 +17,9 @@ class Agent:
     advisor_calls: int
     last_advisor_at: str | None
     linked: bool = True
+    ship: str = ""  # the worktree ship this agent sails with; "" is the flagship's flotilla
+
+    @property
+    def flagship(self) -> bool:
+        """The followed session itself: the root of the flagship's flotilla (captain, cannon, advisor line)."""
+        return self.parent_id is None and not self.ship

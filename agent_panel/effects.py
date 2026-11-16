@@ -24,7 +24,7 @@ class Shot:
 
 def fire(main_boat: Boat, index: int = 0) -> Shot:
     """A shot leaving the gunport on the side the boat faces. `index` fans out simultaneous shots."""
-    w = sprite_width(sprite_key(main_boat.agent_id, main_boat.tier))
+    w = sprite_width(sprite_key(main_boat.flagship, main_boat.tier))
     d = main_boat.direction
     x = main_boat.x + w if d > 0 else main_boat.x - 1
     return Shot(x=x, y=main_boat.lane * LANE_H + 1.5, vx=d * (1.4 + 0.25 * index), vy=0.8 + 0.15 * index)
@@ -50,7 +50,7 @@ def advance(shots: list[Shot]) -> list[Shot]:
 
 def gunport(boat: Boat) -> tuple[int, int]:
     """(x, y above waterline) of the gunport cell."""
-    w = sprite_width(sprite_key(boat.agent_id, boat.tier))
+    w = sprite_width(sprite_key(boat.flagship, boat.tier))
     return (int(round(boat.x)) + (w if boat.direction > 0 else -1), boat.lane * LANE_H + 1)
 
 

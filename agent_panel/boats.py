@@ -61,8 +61,8 @@ def tier(burn: int) -> Literal["rowboat", "sloop", "galleon"]:
     return "sloop" if burn >= TIER_SLOOP else "rowboat"
 
 
-def sprite_key(agent_id: str, boat_tier: str) -> str:
-    return "main_" + boat_tier if agent_id == "main" else boat_tier
+def sprite_key(flagship: bool, boat_tier: str) -> str:
+    return "main_" + boat_tier if flagship else boat_tier
 
 
 def sprite_width(key: str) -> int:
