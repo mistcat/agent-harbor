@@ -246,3 +246,27 @@ def test_pinned_session_found_in_a_profile_that_is_not_newest(tmp_path, monkeypa
     make_session(tmp_path / ".claude-work" / "projects" / "-work-demo", "wanted", mtime=1000)
     w = Watcher(lambda: resolve_project(cwd, home=tmp_path, session="wanted"), pinned="wanted")
     assert w.poll().session_id == "wanted"
+
+
+def test_done_subagent_finished_at_is_its_last_entry(tmp_path):
+    from datetime import datetime
+    make_session(tmp_path)
+    add_sub(tmp_path, "sess1", "a1", finished=True)
+    add_sub(tmp_path, "sess1", "a2", finished=False)
+    snap = by_id(Watcher(tmp_path).poll())
+    assert snap["a1"].finished_at == datetime.fromisoformat("2026-11-13T12:00:00+00:00").timestamp()
+    assert snap["a2"].finished_at is None
+
+
+def test_done_subagent_without_timestamps_falls_back_to_file_mtime(tmp_path):
+    make_session(tmp_path)
+    add_sub(tmp_path, "sess1", "a1", finished=True)
+    f = tmp_path / "sess1" / "subagents" / "agent-a1.jsonl"
+    write_jsonl(f, [{"type": "user", "message": {"content": "hi"}}])
+    os.utime(f, (5000, 5000))
+    assert by_id(Watcher(tmp_path).poll())["a1"].finished_at == 5000
+
+
+def test_malformed_timestamps_do_not_crash_epoch():
+    from agent_panel.session import _epoch
+    assert [_epoch(t) for t in ("not a date", 12345, ["x"], None)] == [None, None, None, None]

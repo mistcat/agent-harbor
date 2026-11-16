@@ -25,3 +25,8 @@ def test_no_sound_flag():
 def test_config_dir_flag():
     assert parse_args(["--config-dir", "/cfg"]).config_dir == Path("/cfg")
     assert parse_args([]).config_dir is None
+
+
+def test_keep_done_flag():
+    assert parse_args(["--keep-done", "30"]).keep_done == 30
+    assert parse_args([]).keep_done == 180

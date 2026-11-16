@@ -6,7 +6,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Static
 
 from agent_panel.effects import FLASH_FRAMES, Shot, advance, fire
-from agent_panel.harbor import Boat, flagship_boat, layout, render_harbor, step
+from agent_panel.harbor import KEEP_DONE_S, Boat, flagship_boat, layout, render_harbor, retire, step
 from agent_panel.model import Agent
 from agent_panel.fleet import Fleet
 from agent_panel.session import Snapshot, Watcher
@@ -29,8 +29,10 @@ class AgentPanelApp(App):
     #harbor { height: 1fr; }
     """
 
-    def __init__(self, watcher: Watcher | Fleet | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True):
+    def __init__(self, watcher: Watcher | Fleet | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True,
+                 keep_done: float = KEEP_DONE_S):
         super().__init__()
+        self.keep_done = keep_done
         self.captain = captain
         self.boomer = boomer if boomer is not None else Boomer(True)
         self.shots: list[Shot] = []
@@ -100,15 +102,17 @@ class AgentPanelApp(App):
             self._show(tree, Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
             self.query_one("#harbor", Static).display = False
             return
-        ships = len({a.ship for a in snap.agents})
+        agents, retired = retire(snap.agents, time.time(), self.keep_done)
+        ships = len({a.ship for a in agents})
         fleet = f" · {ships} ships" if ships > 1 else ""
-        header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}")
+        done = f" · {retired} done" if retired else ""
+        header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}{done}")
         width = tree.size.width or self.size.width
-        rendered = render_tree(snap.agents, width, self.frame, snap.advisor_model)
+        rendered = render_tree(agents, width, self.frame, snap.advisor_model)
         self._show(tree, rendered)
-        self.paint_harbor(snap, rendered.plain.count("\n") + 1)
+        self.paint_harbor(agents, rendered.plain.count("\n") + 1)
 
-    def paint_harbor(self, snap: Snapshot, tree_lines: int) -> None:
+    def paint_harbor(self, agents: list[Agent], tree_lines: int) -> None:
         harbor = self.query_one("#harbor", Static)
         tree_h = min(tree_lines, int(self.size.height * TREE_MAX_FRAC))
         rows = self.size.height - 1 - tree_h
@@ -116,9 +120,9 @@ class AgentPanelApp(App):
         if not harbor.display:
             return
         width = self.size.width
-        self.boats, _ = layout(snap.agents, width, rows, self.boats)
-        step(self.boats, snap.agents, self._dt, width)
-        self._show(harbor, render_harbor(snap.agents, self.boats, width, rows, self.frame, self.shots, self.flash > 0, self.captain))
+        self.boats, _ = layout(agents, width, rows, self.boats)
+        step(self.boats, agents, self._dt, width)
+        self._show(harbor, render_harbor(agents, self.boats, width, rows, self.frame, self.shots, self.flash > 0, self.captain))
 
     def _show(self, widget: Static, text: Text) -> None:
         if self._shown.get(widget.id) != text:

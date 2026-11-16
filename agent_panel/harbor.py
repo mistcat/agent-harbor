@@ -17,6 +17,7 @@ HAT_STYLE = "bold bright_white"
 CAPTAIN_W = STERN_W
 SKULL = "☠" if cell_len("☠") == 1 else "x"
 CALL_OUT = "Fire!"
+KEEP_DONE_S = 180  # a done subagent leaves the tree and the harbor this long after it finished
 # Captain facing right (stern on the left, flotilla astern); mirrored when sailing left.
 # Rows: tricorn crown, brim with skull, head (and arm), body.
 _HAT = [" ▄▄▄ ", "▀▀" + SKULL + "▀▀"]
@@ -54,6 +55,25 @@ def active_ids(agents: list[Agent]) -> set[str]:
     return active
 
 
+def retire(agents: list[Agent], now: float, keep_s: float = KEEP_DONE_S) -> tuple[list[Agent], int]:
+    """Drop subagents that finished more than keep_s ago. Returns (kept agents, retired count).
+
+    Ships (the flagship and the fleet's worktree ships) never retire, nor does a running agent or any
+    ancestor of one; an agent with a kept descendant stays too, so no row loses its parent."""
+    active = active_ids(agents)
+    keep = {a.id for a in agents
+            if a.parent_id is None or a.id in active or a.finished_at is None or now - a.finished_at < keep_s}
+    by_id = {a.id: a for a in agents}
+    for a in agents:
+        if a.id in keep:
+            cur = by_id.get(a.parent_id) if a.parent_id else None
+            while cur is not None and cur.id not in keep:
+                keep.add(cur.id)
+                cur = by_id.get(cur.parent_id) if cur.parent_id else None
+    kept = [a for a in agents if a.id in keep]
+    return kept, len(agents) - len(kept)
+
+
 def captain_pose(agents: list[Agent], flash: bool) -> str:
     """"firing" during the cannon flash, "commanding" while any of the flagship's subagents runs, else "idle"."""
     if flash:
@@ -79,7 +99,10 @@ def _apart(x: float, w: int, other: Boat) -> bool:
 def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) -> tuple[dict[str, Boat], int]:
     """Place one boat per agent, keeping earlier positions. Returns (boats, overflow count)."""
     lanes, per_lane = _lanes(width, height)
-    chosen = agents[: lanes * per_lane]
+    # The flagship first (the cannon fires from it), then running agents and their leaders, so a pile of
+    # finished boats can't crowd a running one out. The sort is stable: parents stay before their children.
+    active = active_ids(agents)
+    chosen = sorted(agents, key=lambda a: 0 if a.flagship else 1 if a.id in active else 2)[: lanes * per_lane]
     boats: dict[str, Boat] = {}
     for a in chosen:
         old = prev.get(a.id)
@@ -99,14 +122,27 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
             pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
             siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
             order = [pref] + [l for l in order if l != pref]
-        for lane in order:
-            w = sprite_width(sprite_key(a.flagship, t))
-            slot = next((s for s in range(per_lane)
-                         if all(b.lane != lane or _apart(s * SLOT_W, w, b) for b in boats.values())), None)
-            if slot is not None:
-                boats[a.id] = Boat(a.id, float(slot * SLOT_W), lane, 1, t, a.flagship)
-                break
+        w = sprite_width(sprite_key(a.flagship, t))
+        spot = _free_slot(boats, order, per_lane, w)
+        if spot is None and (a.flagship or a.id in active):
+            # No room: a finished boat parked in an earlier frame gives up its slot. It is re-slotted
+            # below if there is room elsewhere, else it joins the overflow.
+            spot = _free_slot(boats, order, per_lane, w, movable=lambda b: not b.flagship and b.agent_id not in active)
+            if spot is not None:
+                for b in [b for b in boats.values() if b.lane == spot[0] and not _apart(spot[1], w, b)]:
+                    del boats[b.agent_id]
+        if spot is not None:
+            boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
     return boats, len(agents) - len(boats)
+
+
+def _free_slot(boats: dict[str, Boat], lanes: list[int], per_lane: int, w: int, movable=lambda b: False):
+    """The first (lane, x) where a boat of width w clears every boat that isn't `movable`, or None."""
+    for lane in lanes:
+        for s in range(per_lane):
+            if all(b.lane != lane or movable(b) or _apart(s * SLOT_W, w, b) for b in boats.values()):
+                return lane, float(s * SLOT_W)
+    return None
 
 
 def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int,

@@ -5,6 +5,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from agent_panel.model import Agent
@@ -27,6 +28,13 @@ def slug_dir(cwd: Path, cfg: Path) -> Path:
 def project_dir(cwd: Path, cfg: Path) -> Path | None:
     p = slug_dir(cwd, cfg)
     return p if p.is_dir() else None
+
+
+def _epoch(ts: str | None) -> float | None:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() if ts else None
+    except (ValueError, AttributeError, TypeError):  # a malformed timestamp must not crash poll()
+        return None
 
 
 def _mtime(p: Path) -> float:
@@ -166,8 +174,11 @@ class Watcher:
                 fin = meta.get("finished")
                 if fin is None:
                     fin = files[aid].exists() and now - _mtime(files[aid]) >= SUBAGENT_STALE_S
-                agents.append(self._agent(aid, pid, depth, desc or aid, meta.get("agentType") or "", stats,
-                                          "done" if fin else "running", meta.get("model"), linked))
+                agent = self._agent(aid, pid, depth, desc or aid, meta.get("agentType") or "", stats,
+                                    "done" if fin else "running", meta.get("model"), linked)
+                if fin:  # the last entry's timestamp; the file's mtime matches it to within 0.1s on real transcripts
+                    agent.finished_at = _epoch(stats.last_entry_at) or _mtime(files[aid]) or None
+                agents.append(agent)
                 add(aid, depth + 1)
 
         add("main", 1)

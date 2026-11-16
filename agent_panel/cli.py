@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 from agent_panel.fleet import Fleet
+from agent_panel.harbor import KEEP_DONE_S
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -14,6 +15,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--session", help="pin one session id instead of following the newest")
     p.add_argument("--no-sound", action="store_true", help="don't play the cannon sound on advisor calls")
     p.add_argument("--no-captain", action="store_true", help="don't draw the pirate captain on the main ship")
+    p.add_argument("--keep-done", type=float, default=KEEP_DONE_S, metavar="SECONDS",
+                   help="how long a finished subagent stays on screen (default: %(default)s)")
     return p.parse_args(argv)
 
 
@@ -26,5 +29,5 @@ def main(argv: list[str] | None = None) -> int:
     # The flagship follows --cwd and tolerates a project dir that doesn't exist yet; the repo's other
     # git worktrees each add a ship with its own flotilla.
     watcher = Fleet(cwd, args.config_dir, pinned=args.session)
-    AgentPanelApp(watcher, cwd, Boomer(not args.no_sound), captain=not args.no_captain).run()
+    AgentPanelApp(watcher, cwd, Boomer(not args.no_sound), captain=not args.no_captain, keep_done=args.keep_done).run()
     return 0
