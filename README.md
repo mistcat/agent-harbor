@@ -57,7 +57,7 @@ an `agent-session` controller it shows the whole fleet: every other worktree's s
 ship of its own, with its own flotilla.
 
 - **Top, the tree:** one row per agent, nested by parent, with model, effort, token burn and status.
-- **Bottom, the harbor:** the same agents as boats on the water. Running boats sail with a wake, finished ones anchor and snooze, children sail behind their parent as a flotilla. An advisor call makes the main ship fire a cannon, with a sound.
+- **Bottom, the harbor:** the same agents as boats on the water. Running boats sail with a wake, idle ships anchor and snooze, finished subagents moor at a pier, and children sail behind their parent as a flotilla. An advisor call makes the main ship fire a cannon, with a sound.
 - **The captain:** a small pirate in a white tricorn with a yellow skull stands on the main ship's deck, at any size of boat. Arms down while idle (with `zzz` when the whole flotilla is anchored), an arm raised while any subagent runs, and a "Fire!" call-out during the cannon flash. Subagent boats have no captain. It is dropped, not clipped, when it doesn't fit; `--no-captain` turns it off.
 
 ## Read-only promise
@@ -130,8 +130,12 @@ other ship labelled with its worktree folder name, each followed by its own suba
 `· N ships`. A worktree folder named `main` is labelled `main-2`, and two folders with the same name get `-2`, `-3`
 in worktree-list order. Other ships are plain boats (no captain, no Jolly Roger), and their sessions don't raise
 the captain's arm. Only the flagship fires the cannon; its advisor line closes the flagship's rows, before the
-other ships. Ships that meet in a lane turn around instead of sailing through each other, and the
-flagship is always drawn on top. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More agents than fit show as `+N more`; the flagship is placed first, then every running agent and its leaders, then the rest in tree order, so finished boats never crowd out a running one.
+other ships. Boats never overlap: one that meets another boat in its lane turns around (a follower holds
+its place instead; a child that shares its leader's lane, as in the top lane, sails on its own), and every lane keeps a row of clear water above its tallest boat. The bottom lane is the
+flagship's own, so nothing sails over the captain or into the cannon's arc; other boats use it only when the
+harbor has a single lane. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More sailing boats than fit show as `+N more` (top right); the flagship is placed first, then every running agent and its leaders, then the rest in tree order. That order holds on every frame: a boat keeps its place from the last frame only while no higher-priority boat needs the water.
+
+Finished subagents (ones not leading a running one) stop sailing and moor at a pier at the right end of the bottom lane, fanned like a deck of cards with the most recently finished on top. The pile shows 5 boats at 80 columns and up, 3 from 40 columns, and the rest as `+N` over the pier. Below 40 columns there is no pier, only `+N docked` at the top left (shortened to `+N`, or left out, when `+N more` needs the row). So there are three counts: `+N more` for sailing boats with no room, `+N` at the pier for finished boats under the pile, and `· N done` in the header for retired ones.
 
 A finished subagent leaves both the tree and the harbor 180 seconds after its last transcript entry (`--keep-done` changes this), and the header counts them, e.g. `· 20 done`. Ships never leave, and neither does a subagent that is running, leads a running one, or has a finished subagent of its own still on screen.
 

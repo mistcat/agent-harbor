@@ -21,4 +21,5 @@ From the final review on 2026-11-13, not yet fixed:
 ## Done
 
 - Finished subagents leave the tree and harbor 180s after they finish (`--keep-done`), counted in the header; running boats are laid out first.
+- Boats never overlap each other or the captain; finished subagents moor in a fanned pile at a pier.
 - Watch several Claude sessions at once: the whole fleet a controller is running (agent-panel follows every worktree of the repo).

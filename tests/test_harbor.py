@@ -49,7 +49,7 @@ def test_main_stern_deck_is_clear_for_the_captain():
 
 
 def test_layout_gives_every_agent_a_boat_when_room():
-    boats, over = layout(agents(3), 50, 10, {})
+    boats, over = layout(agents(3), 60, 10, {})
     assert set(boats) == {"main", "a1", "a2"} and over == 0
     assert len({(b.lane, round(b.x)) for b in boats.values()}) == 3
 
@@ -118,7 +118,7 @@ def test_first_boats_sit_on_the_waterline_lane():
     boats, _ = layout(ags, 50, 30, {})
     assert boats["main"].lane == 0 and boats["a1"].lane <= 1  # a child may sail one lane above its parent
     lines = render_harbor(ags, boats, 50, 30, 0).plain.split("\n")
-    assert any("\\" in l for l in lines[-3:-1]) and set(lines[-1]) == {"~"}  # hull rests on the water (bob moves it a row)
+    assert any("\\" in l for l in lines[-3:-1]) and set(lines[-1]) <= {"~", "║"}  # hull rests on the water (bob moves it a row); the pier's posts
 
 
 # ---- Task 6: motion, wake, anchored zzz, frame rate ----
@@ -132,13 +132,12 @@ def sailing(n_done=0):
     return ags
 
 
-def test_running_boat_moves_done_boat_stays():
+def test_running_boat_moves_done_boat_docks():
     ags = sailing(1)
     boats, _ = layout(ags, 60, 10, {})
-    before = {k: b.x for k, b in boats.items()}
+    before = boats["main"].x
     step(boats, ags, 1.0, 60)
-    assert boats["main"].x != before["main"]
-    assert boats["d0"].x == before["d0"]
+    assert boats["main"].x != before and "d0" not in boats
 
 
 def test_boat_turns_at_edge():
@@ -225,9 +224,9 @@ def sail(ags, boats, seconds, width=80, dt=0.1):
 def test_children_sail_behind_parent():
     ags = fleet()
     for direction in (1, -1):
-        boats, _ = layout(ags, 80, 20, {})
+        boats, _ = layout(ags, 100, 20, {})
         boats["main"].x, boats["main"].direction = 40.0, direction
-        sail(ags, boats, 4.0)
+        sail(ags, boats, 4.0, width=100)  # 24 cells either way: clear of the edge and the dock
         p, c = boats["main"], boats["a1"]
         assert abs(p.lane - c.lane) <= 1
         trail = (p.x - c.x) * direction  # positive = child is on the side opposite the parent's heading
@@ -240,7 +239,8 @@ def test_second_child_trails_further_behind():
     boats, _ = layout(ags, 120, 20, {})
     boats["main"].x, boats["main"].direction = 60.0, 1
     sail(ags, boats, 4.0, width=120)
-    assert boats["main"].x > boats["a1"].x > boats["a2"].x
+    kids = sorted((boats["a1"].x, boats["a2"].x), reverse=True)  # ranked by position, not by name
+    assert boats["main"].x > kids[0] > kids[1] and kids[0] - kids[1] >= SLOT_W - 1
 
 
 def test_parent_sails_while_a_child_runs_even_if_main_is_idle():
@@ -252,12 +252,11 @@ def test_parent_sails_while_a_child_runs_even_if_main_is_idle():
     assert "zzz" not in render_harbor(ags, boats, 80, 10, 0).plain
 
 
-def test_done_child_stays_anchored_when_parent_sails():
+def test_done_child_docks_when_parent_sails():
     ags = fleet(child_status="done")
     boats, _ = layout(ags, 80, 20, {})
-    x = boats["a1"].x
     sail(ags, boats, 2.0)
-    assert boats["a1"].x == x
+    assert "a1" not in boats
 
 
 def overlapping_pairs(boats):
@@ -502,16 +501,16 @@ def test_running_agent_is_drawn_despite_finished_siblings_when_capacity_is_tiny(
     # One lane, room for the flagship (two slots wide) plus one more boat.
     fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
             [ag(f"d{i}", "main", 1, status="done") for i in range(5)] + [ag("run", "main", 1)]
-    boats, over = layout(fleet, 30, 7, {})
-    assert set(boats) == {"main", "run"} and over == 5
+    boats, over = layout(fleet, 30, 8, {})
+    assert set(boats) == {"main", "run"} and over == 0  # the finished ones are docked, not overflow
 
 
 def test_running_grandchild_and_its_leader_beat_older_finished_boats():
     fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
             [ag(f"d{i}", "main", 1, status="done") for i in range(5)] + \
             [ag("lead", "main", 1, status="done"), ag("kid", "lead", 2)]
-    boats, _ = layout(fleet, 40, 7, {})  # one lane: the flagship plus two boats
-    assert set(boats) == {"main", "lead", "kid"}
+    boats, over = layout(fleet, 60, 8, {})  # one lane: the flagship plus two boats before the dock
+    assert set(boats) == {"main", "lead", "kid"} and over == 0
 
 
 def test_app_header_counts_retired_subagents(tmp_path):
@@ -539,21 +538,149 @@ def test_app_keeps_fresh_done_subagents_on_screen(tmp_path):
             await pilot.pause(0.7)
             assert str(app.query_one("#header").content) == "agent-panel · abcdef12 · demo"
             assert "review 1" in str(app.query_one("#tree").content)
-            assert "a1" in app.boats
+            assert "a1" not in app.boats  # moored in the pile, not sailing
+            pier = next(l for l in str(app.query_one("#harbor").content).split("\n") if "╤" in l)
+            assert "\\___/" in pier
     asyncio.run(go())
 
 
-def test_new_running_agent_displaces_a_parked_finished_boat_when_the_harbor_is_full():
+def test_a_finished_boat_leaves_open_water_for_the_dock():
     fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
              ag("d0", "main", 1, status="done"), ag("run", "main", 1)]
-    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "d0": Boat("d0", 20.0, 0, 1, tier(1000))}
-    boats, over = layout(fleet, 30, 7, prev)
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "d0": Boat("d0", 20.0, 1, 1, tier(1000))}
+    boats, over = layout(fleet, 60, 20, prev)
+    assert set(boats) == {"main", "run"} and over == 0
+
+
+# ---- Collisions and the dock ----
+import random
+
+import pytest
+
+from agent_panel.boats import sprite_key, sprite_width
+from agent_panel.harbor import LANE_H, _bob, dock_size, dock_x, docked
+
+
+def crowd(n_subs, ships=3, seed=1):
+    """A flagship, `ships` fleet ships and n_subs subagents, a third running, the rest finished."""
+    r = random.Random(seed)
+    out = [ag("main", None, 0, "main", "opus 5.5", burn=400_000)]
+    roots = ["main"]
+    for s in range(ships):
+        out.append(ag(f"w{s}/main", None, 0, f"w{s}", status=r.choice(["running", "idle"]), burn=200_000, ship=f"w{s}"))
+        roots.append(f"w{s}/main")
+    for i in range(n_subs):
+        p = r.choice(roots)
+        out.append(ag(f"{p}-a{i}", p, 1, f"t{i}", status=r.choice(["running", "done", "done"]),
+                      burn=r.choice([5_000, 80_000, 400_000]), ship="" if p == "main" else p.split("/")[0],
+                      finished_at=float(i)))
+    return out
+
+
+def rect(b, height, frame):
+    """(x0, y0, x1, y1) of the cells a boat's sprite covers in a rendered frame."""
+    sprite = SPRITES[sprite_key(b.flagship, b.tier)]
+    top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - _bob(b.agent_id, frame, sprite)
+    x = int(round(b.x))
+    return x, top, x + len(sprite[0]) - 1, top + len(sprite) - 1
+
+
+def hits(a, b):
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+@pytest.mark.parametrize("width,height", [(100, 17), (100, 30), (50, 17), (50, 8)])
+@pytest.mark.parametrize("n", [10, 20, 30])
+def test_sailing_boats_never_overlap_each_other_or_the_captain(width, height, n):
+    ags = crowd(n)
+    moored = {a.id for a in docked(ags)}
+    boats = {}
+    for frame in range(200):
+        boats, over = layout(ags, width, height, boats)
+        step(boats, ags, 0.1, width)
+        rects = {k: rect(b, height, frame) for k, b in boats.items()}
+        ids = sorted(rects)
+        bad = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:] if hits(rects[a], rects[b])]
+        assert not bad, f"frame {frame}: {bad}"
+        assert all(r[1] >= 0 for r in rects.values())  # inside the harbor
+        assert not moored & set(boats)  # finished boats are in the pile, not in open water
+        assert over == len(ags) - len(moored) - len(boats)
+        for b in boats.values():
+            if b.lane == 0:  # lane 0's open water ends at the dock
+                assert b.x + sprite_width(sprite_key(b.flagship, b.tier)) <= dock_x(width)
+            if height >= 1 + 2 * LANE_H:  # with two lanes or more, lane 0 is the flagship's alone
+                assert b.lane > 0 or b.flagship
+
+
+@pytest.mark.parametrize("width", [100, 50])
+@pytest.mark.parametrize("n", [1, 3, 30])
+def test_the_pile_stays_on_its_dock_and_is_bounded(width, n):
+    ags = [ag("main", None, 0, "main", status="idle")] + \
+          [ag(f"d{i}", "main", 1, status="done", finished_at=float(i)) for i in range(n)]
+    lines = render_harbor(ags, {}, width, 17, 0).plain.split("\n")  # no sailing boats: only the dock is drawn
+    cards, _ = dock_size(width)
+    assert all(not l[:dock_x(width)].strip() for l in lines[1:-1])  # row 0 holds "+1 more" (the flagship), the last is water
+    hull = lines[-2][dock_x(width):]
+    assert hull.count("\\") == min(n, cards)
+    label = f"+{n - cards}"
+    assert (label in lines[-3]) == (n > cards)
+
+
+def test_a_narrow_harbor_shows_docked_boats_as_a_count():
+    ags = [ag("main", None, 0, "main", status="idle")] + [ag(f"d{i}", "main", 1, status="done") for i in range(4)]
+    lines = render_harbor(ags, {}, 38, 8, 0).plain.split("\n")
+    assert lines[0].startswith("+4 docked") and len(lines) == 8 and all(len(l) == 38 for l in lines)
+
+
+def test_lanes_keep_a_row_of_clear_water_between_them():
+    for key, sprite in SPRITES.items():
+        assert len(sprite) + max(_bob(i, f, sprite) for i in ("a", "b") for f in range(8)) <= LANE_H - 1, key
+
+
+def test_a_new_running_boat_displaces_an_idle_ship_from_an_earlier_frame():
+    # One lane, 30 columns: room for the flagship and one more boat.
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
+             ag("w0/main", None, 0, "w0", status="idle", ship="w0"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "w0/main": Boat("w0/main", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 30, 8, prev)
     assert set(boats) == {"main", "run"} and over == 1
 
 
-def test_parked_finished_boats_keep_their_place_when_there_is_room():
+def test_idle_boats_keep_their_place_when_there_is_room():
     fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
-             ag("d0", "main", 1, status="done"), ag("run", "main", 1)]
-    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "d0": Boat("d0", 20.0, 0, 1, tier(1000))}
-    boats, over = layout(fleet, 40, 7, prev)
-    assert boats["d0"].x == 20.0 and "run" in boats and over == 0
+             ag("w0/main", None, 0, "w0", status="idle", ship="w0"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "w0/main": Boat("w0/main", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 60, 8, prev)
+    assert boats["w0/main"].x == 20.0 and "run" in boats and over == 0
+
+
+def test_the_flagship_survives_a_shrink_that_strands_it_behind_idle_boats():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
+            [ag(f"w{i}/main", None, 0, f"w{i}", status="idle", ship=f"w{i}") for i in range(3)]
+    prev = {"main": Boat("main", 30.0, 0, 1, tier(1000), True)}
+    prev |= {f"w{i}/main": Boat(f"w{i}/main", 10.0 * i, 0, 1, tier(1000)) for i in range(3)}
+    boats, over = layout(fleet, 50, 8, prev)  # was 60 columns: the flagship's x=30 is now past the dock
+    assert "main" in boats and over == len(fleet) - len(boats)
+
+
+@pytest.mark.parametrize("width", [30, 50, 100])
+def test_the_flagship_never_overflows_while_another_boat_holds_water(width):
+    r = random.Random(width)
+    for trial in range(50):
+        fleet = [ag("main", None, 0, "main", "opus 5.5", status=r.choice(["idle", "running"]), burn=r.choice([1, 400_000]))]
+        fleet += [ag(f"w{i}/main", None, 0, f"w{i}", status=r.choice(["idle", "running"]), ship=f"w{i}") for i in range(6)]
+        prev = {a.id: Boat(a.id, float(r.randrange(0, width)), 0, 1, tier(a.burn), a.flagship) for a in fleet}
+        boats, _ = layout(fleet, width, 8, prev)
+        assert "main" in boats or not boats, (trial, prev)
+
+
+def test_the_docked_and_overflow_counts_never_overwrite_each_other():
+    ags = [ag("main", None, 0, "main", status="idle")] + \
+          [ag(f"w{i}/main", None, 0, f"w{i}", status="running", ship=f"w{i}") for i in range(4)] + \
+          [ag(f"d{i}", "main", 1, status="done") for i in range(10)]
+    for width in (12, 15, 18, 24):
+        boats, over = layout(ags, width, 8, {})
+        top = render_harbor(ags, boats, width, 8, 0).plain.split("\n")[0]
+        assert top.endswith(f"+{over} more"), (width, top)
+        left = top[: width - len(f"+{over} more")]
+        assert left.rstrip() in ("", "+10", "+10 docked") and (not left or left.endswith(" ")), (width, top)

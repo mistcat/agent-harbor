@@ -10,8 +10,10 @@ from agent_panel.model import Agent
 
 SPEED = 6.0  # cells per second for a running boat
 WAKE = "~-."  # nearest to farthest behind the hull
-LANE_H = 6  # tallest sprite
+LANE_H = 7  # tallest sprite plus a row of clear water above it
 SLOT_W = 10  # widest sprite plus a gap
+PILE_STEP = 2  # docked boats fan out like a deck of cards, this many columns apart
+PILE_W = 7  # the widest subagent sprite: the first card of the pile
 CAPTAIN_COLOR = "yellow"  # the skull; not used by any model family
 HAT_STYLE = "bold bright_white"
 CAPTAIN_W = STERN_W
@@ -90,59 +92,111 @@ def _lanes(width: int, height: int) -> tuple[int, int]:
     return max(0, (height - 1) // LANE_H), max(0, width // SLOT_W)
 
 
+def dock_size(width: int) -> tuple[int, int]:
+    """(cards shown in the pile, pier width). Below 40 columns there is no dock, only a count."""
+    if width >= 80:
+        return 5, 6
+    if width >= 40:
+        return 3, 4
+    return 0, 0
+
+
+def dock_x(width: int) -> int:
+    """Where the dock starts: the right end of lane 0's open water."""
+    cards, pier = dock_size(width)
+    return width - (PILE_W + PILE_STEP * (cards - 1) + 1 + pier) if cards else width
+
+
+def lane_width(lane: int, width: int) -> int:
+    """Open water in a lane: lane 0 ends at the dock."""
+    return dock_x(width) if lane == 0 else width
+
+
+def docked(agents: list[Agent]) -> list[Agent]:
+    """Finished subagents that lead no running one: moored in the pile, oldest first, newest on top."""
+    active = active_ids(agents)
+    done = [a for a in agents if a.parent_id is not None and a.status == "done" and a.id not in active]
+    return sorted(done, key=lambda a: a.finished_at if a.finished_at is not None else float("inf"))
+
+
 def _apart(x: float, w: int, other: Boat) -> bool:
     """Whether a boat of width w at x clears `other` by at least a cell."""
     ow = sprite_width(sprite_key(other.flagship, other.tier))
     return x + w < other.x or other.x + ow < x
 
 
+def _clear(x: float, w: int, lane: int, boats, skip: Boat | None = None) -> bool:
+    return all(b is skip or b.lane != lane or _apart(x, w, b) for b in boats)
+
+
+def _blocked(b: Boat, x: float, w: int, boats) -> bool:
+    """Whether moving b to x would run it into another boat in its lane. Boats that already overlap
+    (after a resize or a tier upgrade) may still move apart."""
+    heading = x - b.x
+    return any(o is not b and o.lane == b.lane and not _apart(x, w, o) and (_apart(b.x, w, o) or (o.x - b.x) * heading > 0)
+               for o in boats)
+
+
 def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) -> tuple[dict[str, Boat], int]:
-    """Place one boat per agent, keeping earlier positions. Returns (boats, overflow count)."""
-    lanes, per_lane = _lanes(width, height)
-    # The flagship first (the cannon fires from it), then running agents and their leaders, so a pile of
-    # finished boats can't crowd a running one out. The sort is stable: parents stay before their children.
+    """Place one boat per sailing agent, keeping earlier positions. Finished subagents dock instead (see
+    `docked`). Lane 0 is the flagship's (and the dock's) unless it is the only lane. No two boats in a lane
+    ever overlap: an agent with no room left joins the overflow count. Returns (boats, overflow count)."""
+    lanes, _ = _lanes(width, height)
+    moored = {a.id for a in docked(agents)}
     active = active_ids(agents)
-    chosen = sorted(agents, key=lambda a: 0 if a.flagship else 1 if a.id in active else 2)[: lanes * per_lane]
-    boats: dict[str, Boat] = {}
-    for a in chosen:
+    # The flagship first (the cannon fires from it), then running agents and their leaders, so idle boats
+    # can't crowd a running one out. The sort is stable: parents stay before their children.
+    def rank(a: Agent) -> int:
+        return 0 if a.flagship else 1 if a.id in active else 2
+
+    sailors = sorted((a for a in agents if a.id not in moored), key=rank)
+
+    def allowed(a: Agent) -> list[int]:
+        return list(range(lanes)) if a.flagship or lanes == 1 else list(range(1, lanes))
+
+    def kept(a: Agent) -> Boat | None:
+        """The agent's boat from the last frame, if that position is still legal on its own."""
         old = prev.get(a.id)
         t = tier(a.burn)
         w = sprite_width(sprite_key(a.flagship, t))
-        if old and old.lane < lanes and 0 <= old.x <= width - w:
-            boats[a.id] = Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
+        if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
+            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship)
+        return None
+
+    # Tier by tier, each tier keeps its old positions and then places its newcomers before the next tier
+    # is seated, so a boat from an earlier frame can't hold water a higher tier needs. A newcomer prefers a
+    # slot that leaves lower tiers' old positions free and takes one only when there is no other room.
+    tiers = [[a for a in sailors if rank(a) == r] for r in range(3)]
+    olds = {a.id: b for a in sailors if (b := kept(a))}
+    boats: dict[str, Boat] = {}
     siblings: dict[str, int] = {}
-    for a in chosen:
-        if a.id in boats:
-            continue
-        t = tier(a.burn)
-        order = list(range(lanes))  # lane 0 is the waterline lane; fill it first
-        parent = boats.get(a.parent_id) if a.parent_id else None
-        if parent:  # siblings fan out over the lanes above their parent, so they never share a lane while one is free
-            above = lanes - 1 - parent.lane
-            pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
-            siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
-            order = [pref] + [l for l in order if l != pref]
-        w = sprite_width(sprite_key(a.flagship, t))
-        spot = _free_slot(boats, order, per_lane, w)
-        if spot is None and (a.flagship or a.id in active):
-            # No room: a finished boat parked in an earlier frame gives up its slot. It is re-slotted
-            # below if there is room elsewhere, else it joins the overflow.
-            spot = _free_slot(boats, order, per_lane, w, movable=lambda b: not b.flagship and b.agent_id not in active)
+    for n, group in enumerate(tiers):
+        for a in group:
+            b = olds.get(a.id)
+            if b and _clear(b.x, sprite_width(sprite_key(b.flagship, b.tier)), b.lane, boats.values()):
+                boats[a.id] = b
+        later = [olds[a.id] for g in tiers[n + 1:] for a in g if a.id in olds]
+        for a in group:
+            if a.id in boats:
+                continue
+            t = tier(a.burn)
+            order = allowed(a)  # lowest lane first
+            parent = boats.get(a.parent_id) if a.parent_id else None
+            if parent:  # siblings fan out over the lanes above their parent, so they never share a lane while one is free
+                above = lanes - 1 - parent.lane
+                pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
+                siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
+                order = [pref] + [l for l in order if l != pref] if pref in order else order
+            w = sprite_width(sprite_key(a.flagship, t))
+            spot = None
+            for others in ([*boats.values(), *later], list(boats.values())):
+                spot = next(((lane, float(s * SLOT_W)) for lane in order for s in range(lane_width(lane, width) // SLOT_W + 1)
+                             if s * SLOT_W + w <= lane_width(lane, width) and _clear(s * SLOT_W, w, lane, others)), None)
+                if spot is not None:
+                    break
             if spot is not None:
-                for b in [b for b in boats.values() if b.lane == spot[0] and not _apart(spot[1], w, b)]:
-                    del boats[b.agent_id]
-        if spot is not None:
-            boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
-    return boats, len(agents) - len(boats)
-
-
-def _free_slot(boats: dict[str, Boat], lanes: list[int], per_lane: int, w: int, movable=lambda b: False):
-    """The first (lane, x) where a boat of width w clears every boat that isn't `movable`, or None."""
-    for lane in lanes:
-        for s in range(per_lane):
-            if all(b.lane != lane or movable(b) or _apart(s * SLOT_W, w, b) for b in boats.values()):
-                return lane, float(s * SLOT_W)
-    return None
+                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
+    return boats, len(sailors) - len(boats)
 
 
 def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int,
@@ -158,7 +212,7 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
             continue
         key = sprite_key(b.flagship, b.tier)
         sprite = SPRITES[key] if b.direction > 0 or not b.flagship else mirror(SPRITES[key])
-        bob = ((frame // 4) + sum(map(ord, b.agent_id))) % 2  # bobbing: lift one row on alternate beats
+        bob = _bob(b.agent_id, frame, sprite)
         top = (height - 1) - (b.lane + 1) * LANE_H + (LANE_H - len(sprite)) - bob  # lane 0 sits on the water
         x0 = int(round(b.x))
         for dy, line in enumerate(sprite):
@@ -180,16 +234,16 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
             for i, ch in enumerate("zzz"):
                 if 0 <= top - 1 < height - 1 and 0 <= zx + i < width and grid[top - 1][zx + i][0] == " ":
                     grid[top - 1][zx + i] = (ch, "grey50")
+    over = len(agents) - len(docked(agents)) - len(boats)
+    more = f"+{over} more"[:width] if over > 0 else ""
+    _draw_dock(grid, docked(agents), width - len(more) - 1 if more else width)
     if shots or flash:
         from agent_panel.effects import gunport, overlay  # effects imports Boat from here
 
         main = flagship_boat(boats)
         overlay(grid, list(shots), gunport(main) if flash and main else None)
-    over = len(agents) - len(boats)
-    if over > 0:
-        label = f"+{over} more"[:width]
-        for i, ch in enumerate(label):
-            grid[0][width - len(label) + i] = (ch, "bold yellow")
+    for i, ch in enumerate(more):
+        grid[0][width - len(more) + i] = (ch, "bold yellow")
     out = Text(no_wrap=True)
     for y, row in enumerate(grid):
         for ch, style in row:
@@ -197,6 +251,48 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
         if y < height - 1:
             out.append("\n")
     return out
+
+
+def _bob(agent_id: str, frame: int, sprite: list[str]) -> int:
+    """Lift a boat one row on alternate beats, but only when that still leaves its lane a clear top row."""
+    return ((frame // 4) + sum(map(ord, agent_id))) % 2 if len(sprite) <= LANE_H - 2 else 0
+
+
+def _draw_dock(grid, moored: list[Agent], room: int) -> None:
+    """The pier at the right end of lane 0, with the newest finished boats fanned against it like a deck of
+    cards and a count of the ones that don't fit. Below 40 columns only the count is shown, top left, in at
+    most `room` columns (the overflow count holds the right end of that row): shortened to "+N", or dropped."""
+    height, width = len(grid), len(grid[0])
+    cards, pier = dock_size(width)
+    hidden = len(moored) - min(len(moored), cards)
+    if not cards:
+        text = next((t for t in (f"+{hidden} docked", f"+{hidden}") if len(t) <= room), "")
+        if hidden and height > 1:
+            for i, ch in enumerate(text):
+                grid[0][i] = (ch, "green")
+        return
+    hull_y = height - 2
+    x0 = dock_x(width)
+    px = width - pier
+    if hull_y < 1:
+        return
+    for x in range(px, width):  # the planks, on posts that stand in the water
+        grid[hull_y][x] = ("╤" if (x - px) % 3 == 0 else "═", "tan")
+        if (x - px) % 3 == 0:
+            grid[height - 1][x] = ("║", "tan")
+    shown = moored[len(moored) - min(len(moored), cards):]
+    for i, a in enumerate(shown):  # oldest first, so the newest lies on top
+        sprite = SPRITES[tier(a.burn)]
+        x = px - 1 - sprite_width(tier(a.burn)) - PILE_STEP * (len(shown) - 1 - i)
+        top = hull_y - len(sprite) + 1
+        for dy, line in enumerate(sprite):
+            for dx, ch in enumerate(line):
+                if ch != " " and top + dy >= 0 and x0 <= x + dx < px:
+                    grid[top + dy][x + dx] = (ch, model_color(a.model) if ch == SAIL else "grey50")
+    if hidden:
+        label = f"+{hidden}"[:pier]
+        for i, ch in enumerate(label):
+            grid[hull_y - 1][px + i] = (ch, "green")
 
 
 def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say: str, pose: str) -> bool:
@@ -222,38 +318,50 @@ def _seat_captain(grid, b: Boat, x0: int, hull_y: int, w: int, height: int, say:
 
 
 def step(boats: dict[str, Boat], agents: list[Agent], dt: float, width: int) -> None:
-    """Move sailing boats; running children follow their parent. Done and idle boats stay put.
-    Lead boats (a ship, or a boat whose parent is anchored) turn around when they meet in a lane."""
+    """Move sailing boats; running children follow their parent. Idle boats stay put.
+
+    No move ever makes two boats in a lane overlap. A lead boat (a ship, a boat whose parent is anchored,
+    or a child sharing its parent's lane) turns around when it meets another boat or the end of its open
+    water; a follower that is blocked holds its place. Followers rank by how far astern they are, so after
+    the leader turns they never have to sail through each other."""
     active = active_ids(agents)
-    leaders = [boats[a.id] for a in agents if a.id in boats and a.id in active
-               and not (a.parent_id in boats and a.parent_id in active)]
-    followers: dict[str, int] = {}
+    by_parent: dict[str, list[Boat]] = {}
     for a in agents:  # parents come before their children
         b = boats.get(a.id)
         if b is None or a.id not in active:
             continue
         parent = boats.get(a.parent_id) if a.parent_id else None
-        if not parent or a.parent_id not in active:
-            _sail(b, dt, width, [o for o in leaders if o is not b and o.lane == b.lane])
-            continue
-        k = followers[a.parent_id] = followers.get(a.parent_id, 0) + 1
-        w = sprite_width(sprite_key(b.flagship, b.tier))
-        b.direction = parent.direction
+        if not parent or a.parent_id not in active or parent.lane == b.lane:
+            _sail(b, dt, lane_width(b.lane, width), boats.values())
+        else:
+            by_parent.setdefault(a.parent_id, []).append(b)
+    for pid, kids in by_parent.items():
+        parent = boats[pid]
         lead = max(sprite_width(sprite_key(parent.flagship, parent.tier)) - SLOT_W, 0)  # a long flagship
-        target = parent.x - parent.direction * SLOT_W * k + (lead if parent.direction < 0 else 0)
-        if 0 <= target <= width - w:  # out of range (leader at an edge): hold, don't pile up
-            b.x += (target - b.x) * min(1.0, 4 * dt)
-        b.x = min(max(b.x, 0.0), float(max(width - w, 0)))
+        for k, b in enumerate(sorted(kids, key=lambda b: -b.x * parent.direction), start=1):
+            w = sprite_width(sprite_key(b.flagship, b.tier))
+            b.direction = parent.direction
+            target = parent.x - parent.direction * SLOT_W * k + (lead if parent.direction < 0 else 0)
+            room = lane_width(b.lane, width) - w
+            if not 0 <= target <= room:  # out of range (leader at an edge): hold, don't pile up
+                continue
+            x = min(max(b.x + (target - b.x) * min(1.0, 4 * dt), 0.0), float(max(room, 0)))
+            if not _blocked(b, x, w, boats.values()):
+                b.x = x
 
 
-def _sail(b: Boat, dt: float, width: int, lane_leaders: list[Boat] = ()) -> None:
+def _sail(b: Boat, dt: float, room: int, others) -> None:
     w = sprite_width(sprite_key(b.flagship, b.tier))
     x = b.x + b.direction * SPEED * dt
-    if any(not _apart(x, w, o) and (o.x - b.x) * b.direction > 0 for o in lane_leaders):
-        b.direction = -b.direction  # another lead boat ahead: turn around, as at the harbor's edge
+    if x > room - w:
+        x, turn = float(max(room - w, 0)), True
+    elif x < 0:
+        x, turn = 0.0, True
+    else:
+        turn = False
+    if _blocked(b, x, w, others):  # another boat ahead: turn around, as at an edge
+        b.direction = -b.direction
         return
     b.x = x
-    if b.x > width - w:
-        b.x, b.direction = float(max(width - w, 0)), -1
-    elif b.x < 0:
-        b.x, b.direction = 0.0, 1
+    if turn:
+        b.direction = -1 if x > 0 else 1
