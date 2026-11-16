@@ -17,8 +17,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="also show the worktree sessions of another git repo (repeatable)")
     p.add_argument("--no-sound", action="store_true", help="no sounds at all (cannon and attention call)")
     p.add_argument("--no-captain", action="store_true", help="don't draw the pirate captain on the main ship")
-    p.add_argument("--attention-sound", choices=["boom", "say", "off"], default="boom",
-                   help='sound when the main session waits on you: a deep cannon, macOS `say` "Ahoy, matey", or off (default: boom)')
+    p.add_argument("--attention-sound", choices=["boom", "ahoy", "say", "off"], default="boom",
+                   help='sound when the main session waits on you: a deep cannon, a recorded "Ahoy, matey", macOS `say` '
+                        '"Ahoy, matey", or off (default: boom)')
     p.add_argument("--keep-done", type=float, default=KEEP_DONE_S, metavar="SECONDS",
                    help="how long a finished subagent stays on screen (default: %(default)s)")
     return p.parse_args(argv)
