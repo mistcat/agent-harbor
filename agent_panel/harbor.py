@@ -234,17 +234,16 @@ def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, heigh
             for i, ch in enumerate("zzz"):
                 if 0 <= top - 1 < height - 1 and 0 <= zx + i < width and grid[top - 1][zx + i][0] == " ":
                     grid[top - 1][zx + i] = (ch, "grey50")
-    _draw_dock(grid, docked(agents), frame)
+    over = len(agents) - len(docked(agents)) - len(boats)
+    more = f"+{over} more"[:width] if over > 0 else ""
+    _draw_dock(grid, docked(agents), width - len(more) - 1 if more else width)
     if shots or flash:
         from agent_panel.effects import gunport, overlay  # effects imports Boat from here
 
         main = flagship_boat(boats)
         overlay(grid, list(shots), gunport(main) if flash and main else None)
-    over = len(agents) - len(docked(agents)) - len(boats)
-    if over > 0:
-        label = f"+{over} more"[:width]
-        for i, ch in enumerate(label):
-            grid[0][width - len(label) + i] = (ch, "bold yellow")
+    for i, ch in enumerate(more):
+        grid[0][width - len(more) + i] = (ch, "bold yellow")
     out = Text(no_wrap=True)
     for y, row in enumerate(grid):
         for ch, style in row:
@@ -259,15 +258,17 @@ def _bob(agent_id: str, frame: int, sprite: list[str]) -> int:
     return ((frame // 4) + sum(map(ord, agent_id))) % 2 if len(sprite) <= LANE_H - 2 else 0
 
 
-def _draw_dock(grid, moored: list[Agent], frame: int) -> None:
+def _draw_dock(grid, moored: list[Agent], room: int) -> None:
     """The pier at the right end of lane 0, with the newest finished boats fanned against it like a deck of
-    cards and a count of the ones that don't fit. Below 40 columns only the count is shown, top left."""
+    cards and a count of the ones that don't fit. Below 40 columns only the count is shown, top left, in at
+    most `room` columns (the overflow count holds the right end of that row): shortened to "+N", or dropped."""
     height, width = len(grid), len(grid[0])
     cards, pier = dock_size(width)
     hidden = len(moored) - min(len(moored), cards)
     if not cards:
+        text = next((t for t in (f"+{hidden} docked", f"+{hidden}") if len(t) <= room), "")
         if hidden and height > 1:
-            for i, ch in enumerate(f"+{hidden} docked"[:width]):
+            for i, ch in enumerate(text):
                 grid[0][i] = (ch, "green")
         return
     hull_y = height - 2
