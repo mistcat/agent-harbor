@@ -461,3 +461,83 @@ def test_flagship_and_captain_drawn_over_a_crossing_ship():
     w = len(SPRITES["main_rowboat"][0])
     cells = [(y, x) for y in range(11) for x in range(10, 10 + w) if solo[y][x] != " "]
     assert cells and all(both[y][x] == solo[y][x] for y, x in cells)
+
+
+def test_retire_drops_old_done_keeps_fresh_done():
+    from agent_panel.harbor import retire
+    fleet = [ag("main", None, 0, status="idle"),
+             ag("old", "main", 1, status="done", finished_at=1000.0),
+             ag("fresh", "main", 1, status="done", finished_at=1000.0 + 200)]
+    kept, retired = retire(fleet, now=1000.0 + 250, keep_s=120)
+    assert [a.id for a in kept] == ["main", "fresh"] and retired == 1
+
+
+def test_retire_keeps_ships_and_ancestors_of_running_agents():
+    from agent_panel.harbor import retire
+    fleet = [ag("main", None, 0, status="idle"),
+             ag("lead", "main", 1, status="done", finished_at=0.0),
+             ag("kid", "lead", 2, status="running"),
+             ag("w/main", None, 0, status="idle", ship="w"),  # a fleet ship never retires
+             ag("w/a1", "w/main", 1, status="done", finished_at=0.0, ship="w")]
+    kept, retired = retire(fleet, now=10_000.0)
+    assert [a.id for a in kept] == ["main", "lead", "kid", "w/main"] and retired == 1
+
+
+def test_retire_keeps_the_parent_of_a_fresh_done_child():
+    from agent_panel.harbor import retire
+    fleet = [ag("main", None, 0, status="idle"),
+             ag("lead", "main", 1, status="done", finished_at=0.0),
+             ag("kid", "lead", 2, status="done", finished_at=990.0)]
+    kept, retired = retire(fleet, now=1000.0)
+    assert [a.id for a in kept] == ["main", "lead", "kid"] and retired == 0
+
+
+def test_retire_keeps_done_agents_without_a_finish_time():
+    from agent_panel.harbor import retire
+    fleet = [ag("main", None, 0), ag("a1", "main", 1, status="done")]
+    assert retire(fleet, now=10**9) == (fleet, 0)
+
+
+def test_running_agent_is_drawn_despite_finished_siblings_when_capacity_is_tiny():
+    # One lane, room for the flagship (two slots wide) plus one more boat.
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
+            [ag(f"d{i}", "main", 1, status="done") for i in range(5)] + [ag("run", "main", 1)]
+    boats, over = layout(fleet, 30, 7, {})
+    assert set(boats) == {"main", "run"} and over == 5
+
+
+def test_running_grandchild_and_its_leader_beat_older_finished_boats():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle")] + \
+            [ag(f"d{i}", "main", 1, status="done") for i in range(5)] + \
+            [ag("lead", "main", 1, status="done"), ag("kid", "lead", 2)]
+    boats, _ = layout(fleet, 40, 7, {})  # one lane: the flagship plus two boats
+    assert set(boats) == {"main", "lead", "kid"}
+
+
+def test_app_header_counts_retired_subagents(tmp_path):
+    make_session(tmp_path, "abcdef123456", main_blocks=[agent_call(f"toolu_{i}", f"review {i}") for i in range(3)])
+    for i in range(3):  # finished 2026-11-13: long past the keep window
+        add_sub(tmp_path, "abcdef123456", f"a{i}", f"toolu_{i}", finished=True, desc=f"review {i}")
+
+    async def go():
+        app = AgentPanelApp(Watcher(tmp_path), Path("/proj/demo"))
+        async with app.run_test(size=(50, 30)) as pilot:
+            await pilot.pause(0.7)
+            assert str(app.query_one("#header").content) == "agent-panel · abcdef12 · demo · 3 done"
+            assert "review" not in str(app.query_one("#tree").content)
+            assert set(app.boats) == {"main"}
+    asyncio.run(go())
+
+
+def test_app_keeps_fresh_done_subagents_on_screen(tmp_path):
+    make_session(tmp_path, "abcdef123456", main_blocks=[agent_call("toolu_1", "review 1")])
+    add_sub(tmp_path, "abcdef123456", "a1", "toolu_1", finished=True, desc="review 1")
+
+    async def go():
+        app = AgentPanelApp(Watcher(tmp_path), Path("/proj/demo"), keep_done=10**10)
+        async with app.run_test(size=(50, 30)) as pilot:
+            await pilot.pause(0.7)
+            assert str(app.query_one("#header").content) == "agent-panel · abcdef12 · demo"
+            assert "review 1" in str(app.query_one("#tree").content)
+            assert "a1" in app.boats
+    asyncio.run(go())
