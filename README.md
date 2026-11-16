@@ -205,9 +205,15 @@ started the Claude, so wire it once in your user-level Claude settings:
 }
 ```
 
-A project whose `.claude/settings.json` or `.claude/settings.local.json` runs its own `bin/agent-stop-hook`
-keeps it: the user-level hook stands down there, so each stop reports once. A `bin/agent-stop-hook` that the
-project's settings don't run, such as the one in each of this repo's worktrees, changes nothing.
+A project whose `.claude/settings.json` or `.claude/settings.local.json` runs its own copy of the hook from
+its `hooks` keeps it: the user-level hook stands down there, so each stop reports once. Only commands under
+`hooks` count, and only ones that run a different file: a bare `agent-stop-hook`, `~/.local/bin/agent-stop-hook`
+and any path that resolves to the installed hook are the user-level install, not a copy, and a `permissions`
+entry or any other mention never counts. So a `bin/agent-stop-hook` that the project's settings don't run,
+such as the one in each of this repo's worktrees, changes nothing. Two layouts still report twice per stop:
+project settings that run the installed hook (by `~/.local/bin` or by its real path) on top of the user-level
+wiring, and a project copy that is only a symlink to the installed hook. Both wire the same hook twice; drop
+one of the two wirings.
 
 Reports land in `${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox` (override with
 `AGENT_SESSION_INBOX`); `agent-session inbox` prints and archives them.

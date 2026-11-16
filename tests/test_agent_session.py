@@ -480,6 +480,75 @@ def test_hook_reports_from_a_worktree_with_an_unwired_copy(world, tmp_path, sett
     assert "agent: harbor-x" in report.read_text() and "report" in report.read_text()
 
 
+USER_STOP = "command -v agent-stop-hook >/dev/null && agent-stop-hook || true"  # as the README wires it
+
+
+def one_stop(world, tmp_path, proj, user_cmds=(USER_STOP,)):
+    """One stop, as Claude runs it: every user-level Stop command, then every command in the project's
+    .claude/settings{,.local}.json Stop hooks, from the project dir, with ~/.local/bin/agent-stop-hook a
+    symlink to the real hook. Returns how many reports landed."""
+    home = tmp_path / "home"
+    local = home / ".local" / "bin"
+    if not local.exists():
+        local.mkdir(parents=True)
+        (local / "agent-stop-hook").symlink_to(HOOK)
+    inbox = tmp_path / "hookbox"
+    shutil.rmtree(inbox, ignore_errors=True)
+    env = {k: v for k, v in world.env.items() if not k.startswith("AGENT_SESSION_")}
+    env.update(HOME=str(home), PATH=f"{local}:{env['PATH']}", CLAUDE_PROJECT_DIR=str(proj),
+               AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
+    cmds = list(user_cmds)
+    for f in ("settings.json", "settings.local.json"):
+        if (proj / ".claude" / f).exists():
+            data = json.loads((proj / ".claude" / f).read_text())
+            cmds += [h["command"] for m in data.get("hooks", {}).get("Stop", []) for h in m["hooks"]]
+    for cmd in cmds:
+        assert run(["bash", "-c", cmd], proj, env, input=json.dumps({"last_assistant_message": "x"})).returncode == 0
+    return len(list(inbox.iterdir())) if inbox.exists() else 0
+
+
+def worktree(tmp_path, settings=None, settings_file="settings.json"):
+    """A worktree-like project carrying its own copy of the hook, with optional .claude settings."""
+    wt = tmp_path / "agent-harbor-worktrees" / "harbor-x"
+    (wt / "bin").mkdir(parents=True)
+    shutil.copy(HOOK, wt / "bin" / "agent-stop-hook")
+    (wt / "bin" / "agent-stop-hook").chmod(0o755)
+    if settings is not None:
+        (wt / ".claude").mkdir()
+        (wt / ".claude" / settings_file).write_text(json.dumps(settings))
+    return wt
+
+
+def stop_hooks(*cmds):
+    return {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": c} for c in cmds]}]}}
+
+
+@pytest.mark.parametrize("settings_file", ["settings.json", "settings.local.json"])
+def test_one_report_when_the_project_wires_its_own_copy(world, tmp_path, settings_file):
+    wt = worktree(tmp_path, stop_hooks('"$CLAUDE_PROJECT_DIR"/bin/agent-stop-hook'), settings_file)
+    assert one_stop(world, tmp_path, wt) == 1
+    assert one_stop(world, tmp_path, wt, user_cmds=()) == 1  # that one is the project's: the user copy stood down
+
+
+@pytest.mark.parametrize("cmd", ["~/.local/bin/agent-stop-hook", '"$HOME/.local/bin/agent-stop-hook"'])
+def test_one_report_when_the_project_wires_the_user_level_install(world, tmp_path, cmd):
+    """X2: the project's hooks run ~/.local/bin/agent-stop-hook (no user-level wiring): that is not a copy."""
+    assert one_stop(world, tmp_path, worktree(tmp_path, stop_hooks(cmd)), user_cmds=()) == 1
+
+
+def test_one_report_when_the_project_wires_a_path_that_resolves_to_the_running_hook(world, tmp_path):
+    """5a: the project's hooks run the installed hook by its absolute real path, from a worktree with a copy."""
+    assert one_stop(world, tmp_path, worktree(tmp_path, stop_hooks(str(HOOK))), user_cmds=()) == 1
+
+
+@pytest.mark.parametrize("settings", [
+    {"permissions": {"allow": ["Bash(bin/agent-stop-hook:*)", "Bash(./bin/agent-stop-hook)"]}},  # X4
+    {"env": {"STOP_HOOK": "$CLAUDE_PROJECT_DIR/bin/agent-stop-hook"}, "statusLine": {"command": "bin/agent-stop-hook"}},
+])
+def test_mentions_outside_hooks_never_count(world, tmp_path, settings):
+    assert one_stop(world, tmp_path, worktree(tmp_path, settings)) == 1
+
+
 # --- rexclaude ---------------------------------------------------------------------------
 
 REXCLAUDE = BIN / "rexclaude"
