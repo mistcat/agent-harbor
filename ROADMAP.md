@@ -20,4 +20,5 @@ From the final review on 2026-11-13, not yet fixed:
 
 ## Done
 
+- Finished subagents leave the tree and harbor 120s after they finish (`--keep-done`), counted in the header; running boats are laid out first.
 - Watch several Claude sessions at once: the whole fleet a controller is running (agent-panel follows every worktree of the repo).

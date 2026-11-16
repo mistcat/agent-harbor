@@ -541,3 +541,19 @@ def test_app_keeps_fresh_done_subagents_on_screen(tmp_path):
             assert "review 1" in str(app.query_one("#tree").content)
             assert "a1" in app.boats
     asyncio.run(go())
+
+
+def test_new_running_agent_displaces_a_parked_finished_boat_when_the_harbor_is_full():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
+             ag("d0", "main", 1, status="done"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "d0": Boat("d0", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 30, 7, prev)
+    assert set(boats) == {"main", "run"} and over == 1
+
+
+def test_parked_finished_boats_keep_their_place_when_there_is_room():
+    fleet = [ag("main", None, 0, "main", "opus 5.5", status="idle"),
+             ag("d0", "main", 1, status="done"), ag("run", "main", 1)]
+    prev = {"main": Boat("main", 0.0, 0, 1, tier(1000), True), "d0": Boat("d0", 20.0, 0, 1, tier(1000))}
+    boats, over = layout(fleet, 40, 7, prev)
+    assert boats["d0"].x == 20.0 and "run" in boats and over == 0

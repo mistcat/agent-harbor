@@ -122,14 +122,27 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
             pref = parent.lane + 1 + siblings.get(a.parent_id, 0) % above if above else parent.lane
             siblings[a.parent_id] = siblings.get(a.parent_id, 0) + 1
             order = [pref] + [l for l in order if l != pref]
-        for lane in order:
-            w = sprite_width(sprite_key(a.flagship, t))
-            slot = next((s for s in range(per_lane)
-                         if all(b.lane != lane or _apart(s * SLOT_W, w, b) for b in boats.values())), None)
-            if slot is not None:
-                boats[a.id] = Boat(a.id, float(slot * SLOT_W), lane, 1, t, a.flagship)
-                break
+        w = sprite_width(sprite_key(a.flagship, t))
+        spot = _free_slot(boats, order, per_lane, w)
+        if spot is None and (a.flagship or a.id in active):
+            # No room: a finished boat parked in an earlier frame gives up its slot. It is re-slotted
+            # below if there is room elsewhere, else it joins the overflow.
+            spot = _free_slot(boats, order, per_lane, w, movable=lambda b: not b.flagship and b.agent_id not in active)
+            if spot is not None:
+                for b in [b for b in boats.values() if b.lane == spot[0] and not _apart(spot[1], w, b)]:
+                    del boats[b.agent_id]
+        if spot is not None:
+            boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship)
     return boats, len(agents) - len(boats)
+
+
+def _free_slot(boats: dict[str, Boat], lanes: list[int], per_lane: int, w: int, movable=lambda b: False):
+    """The first (lane, x) where a boat of width w clears every boat that isn't `movable`, or None."""
+    for lane in lanes:
+        for s in range(per_lane):
+            if all(b.lane != lane or movable(b) or _apart(s * SLOT_W, w, b) for b in boats.values()):
+                return lane, float(s * SLOT_W)
+    return None
 
 
 def render_harbor(agents: list[Agent], boats: dict[str, Boat], width: int, height: int, frame: int,
