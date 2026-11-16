@@ -30,3 +30,8 @@ def test_config_dir_flag():
 def test_keep_done_flag():
     assert parse_args(["--keep-done", "30"]).keep_done == 30
     assert parse_args([]).keep_done == 180
+
+
+def test_also_repo_flag_repeats():
+    assert parse_args([]).also_repo == []
+    assert parse_args(["--also-repo", "/a", "--also-repo", "/b"]).also_repo == [Path("/a"), Path("/b")]

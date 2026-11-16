@@ -102,6 +102,11 @@ a worktree with no Claude session yet adds nothing. Outside a git repo, or in a 
 `--solo` session, say), it shows the one session exactly as before. Reading the worktree list changes nothing; the
 read-only promise is unchanged.
 
+A controller working across two repos adds the other with `--also-repo PATH` (repeatable; any folder in that repo
+will do). Each of that repo's worktrees adds a ship labelled `<repo>:<worktree>`, for example `agent-harbor:harbor-prune`,
+so a worktree name both repos use stays unambiguous. Its main checkout is left out, since that is usually the
+other repo's own controller. A path that is not a git repo, or can't be read, adds nothing.
+
 Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-panel looks in `~/.claude` and every `~/.claude-*` folder and follows the one whose copy of the project has the most recently written transcript. Pin one with `--config-dir PATH`; an explicit `--config-dir` beats the environment variable, which beats the search.
 
 ## Options
@@ -110,6 +115,7 @@ Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-pane
 | --- | --- |
 | `--cwd PATH` | project directory to follow (default: current directory) |
 | `--session ID` | pin one session instead of following the newest |
+| `--also-repo PATH` | also show the worktree sessions of another git repo (repeatable) |
 | `--config-dir PATH` | Claude config dir to read |
 | `--no-sound` | no cannon boom |
 | `--no-captain` | no pirate captain on the main ship |
