@@ -580,10 +580,10 @@ def crowd(n_subs, ships=3, seed=1):
 
 def rect(b, height, frame):
     """(x0, y0, x1, y1) of the cells a boat covers in a rendered frame: its sprite, and its label row under
-    the hull when it has a label."""
+    the hull when the harbor shows label rows."""
     from agent_panel.harbor import footprint, hull_row
     sprite = SPRITES[sprite_key(b.flagship, b.tier)]
-    lab = bool(b.label)
+    lab = b.labelled
     bob = _bob(b.agent_id, frame, sprite)
     hull = hull_row(height, b.lane, lab) - bob
     x = int(round(b.x))

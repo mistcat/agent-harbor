@@ -55,9 +55,8 @@ def gunport(boat: Boat) -> tuple[int, int]:
 
 
 def _hull_y(boat: Boat) -> int:
-    """The hull's height above the waterline: one more when a label row sits under it."""
-    labelled = bool(boat.label)
-    return boat.lane * lane_h(labelled) + 1 + labelled
+    """The hull's height above the waterline: one more when the harbor shows label rows."""
+    return boat.lane * lane_h(boat.labelled) + 1 + boat.labelled
 
 
 def overlay(grid: list[list[tuple[str, str]]], shots: list[Shot], flash_at: tuple[int, int] | None) -> None:

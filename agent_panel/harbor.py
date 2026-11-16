@@ -43,6 +43,7 @@ class Boat:
     tier: str
     flagship: bool = False
     label: str = ""  # the owning ship's name, shown under the hull when there are several ships
+    labelled: bool = False  # the harbor shows label rows (see `labelled`), so the hull sits a row higher
 
 
 def footprint(flagship: bool, boat_tier: str, label: str = "") -> int:
@@ -130,7 +131,7 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
         w = words[k]
         shared = max((next((i for i, (x, y) in enumerate(zip(w, o)) if x != y), min(len(w), len(o)))
                       for j, o in words.items() if j != k), default=0)
-        full[k] = w[shared] if shared < len(w) else name
+        full[k] = (w[shared] if shared < len(w) else "") or name or k  # never empty: the word, the name, the key
 
     def cut(label: str) -> str:
         return label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
@@ -235,7 +236,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         label = names.get(a.ship, "")
         w = footprint(a.flagship, t, label)
         if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
-            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship, label)
+            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship, label, lab)
         return None
 
     # Tier by tier, each tier keeps its old positions and then places its newcomers before the next tier
@@ -271,7 +272,7 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
                 if spot is not None:
                     break
             if spot is not None:
-                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship, label)
+                boats[a.id] = Boat(a.id, spot[1], spot[0], 1, t, a.flagship, label, lab)
     return boats, len(sailors) - len(boats)
 
 
