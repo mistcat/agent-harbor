@@ -672,3 +672,15 @@ def test_the_flagship_never_overflows_while_another_boat_holds_water(width):
         prev = {a.id: Boat(a.id, float(r.randrange(0, width)), 0, 1, tier(a.burn), a.flagship) for a in fleet}
         boats, _ = layout(fleet, width, 8, prev)
         assert "main" in boats or not boats, (trial, prev)
+
+
+def test_the_docked_and_overflow_counts_never_overwrite_each_other():
+    ags = [ag("main", None, 0, "main", status="idle")] + \
+          [ag(f"w{i}/main", None, 0, f"w{i}", status="running", ship=f"w{i}") for i in range(4)] + \
+          [ag(f"d{i}", "main", 1, status="done") for i in range(10)]
+    for width in (12, 15, 18, 24):
+        boats, over = layout(ags, width, 8, {})
+        top = render_harbor(ags, boats, width, 8, 0).plain.split("\n")[0]
+        assert top.endswith(f"+{over} more"), (width, top)
+        left = top[: width - len(f"+{over} more")]
+        assert left.rstrip() in ("", "+10", "+10 docked") and (not left or left.endswith(" ")), (width, top)
