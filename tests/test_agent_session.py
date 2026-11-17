@@ -974,3 +974,88 @@ def test_plain_inbox_and_wait_output_unchanged(world):
     r = world.session("inbox", "--wait", "--timeout", "0")
     assert (r.returncode, r.stdout) == (2, "")
     assert r.stderr == "agent-session: no agent reports after 0s\n"
+
+
+def unreadable(inbox, name):
+    drop(inbox, name, "secret\n")
+    (inbox / name).chmod(0)
+
+
+@pytest.fixture
+def box(world):
+    inbox = world.tmp / "box"
+    inbox.mkdir()
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    yield inbox
+    for p in inbox.iterdir():
+        p.chmod(0o755 if p.is_dir() else 0o644)
+
+
+def test_wait_keeps_waiting_past_an_unreadable_report(world, box):
+    unreadable(box, "bad-100")
+    t0 = time.monotonic()
+    r = world.session("inbox", "--wait", "--timeout", "3")
+    assert time.monotonic() - t0 >= 2.5
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.count("bad-100") == 1, r.stderr  # warned once, not every pass
+    assert r.stderr.endswith("agent-session: no agent reports after 3s\n")
+
+
+def test_wait_prints_a_report_that_arrives_after_an_unreadable_one(world, box):
+    unreadable(box, "bad-100")
+    p = subprocess.Popen([str(SESSION), "inbox", "--wait", "--timeout", "20"], cwd=world.repo,
+                         env=world.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(1)
+    assert p.poll() is None
+    drop(box, "good-200", "fine\n")
+    out, _ = p.communicate(timeout=10)
+    assert (p.returncode, out) == (0, "== good-200\nfine\n\n")
+
+
+def test_plain_inbox_says_no_reports_when_it_could_print_none(world, box):
+    unreadable(box, "bad-100")
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+    assert "bad-100" in r.stderr
+
+
+def test_plain_inbox_says_no_reports_when_another_reader_claimed_them(world, box):
+    # A report listed but gone before the move: simulate the follower winning the race with a
+    # fake mv that archives the file itself and then fails, as a losing mv would.
+    drop(box, "a-100", "first\n")
+    fake = world.tmp / "racebin"
+    fake.mkdir()
+    mv = fake / "mv"
+    mv.write_text('#!/bin/sh\nmkdir -p "$(dirname "$2")"\n/bin/mv "$1" "$2"\nexit 1\n')
+    mv.chmod(0o755)
+    world.env["PATH"] = f"{fake}:{world.env['PATH']}"
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+
+
+def test_closed_output_leaves_reports_unread(world, box):
+    drop(box, "a-100", "first\n")
+    drop(box, "b-200", "second\n")
+    rd, wr = os.pipe()
+    os.close(rd)  # the reader is gone before anything is written
+    try:
+        p = subprocess.run([str(SESSION), "inbox"], cwd=world.repo, env=world.env, stdout=wr,
+                           stderr=subprocess.PIPE, text=True, timeout=10)
+    finally:
+        os.close(wr)
+    assert p.returncode != 0
+    assert sorted(x.name for x in box.iterdir() if x.name != "read") == ["a-100", "b-200"]
+    assert not (box / "read").exists() or not list((box / "read").iterdir())
+
+
+def test_follow_whose_reader_exits_leaves_the_report_unread(world, box):
+    rd, wr = os.pipe()
+    p = subprocess.Popen([str(SESSION), "inbox", "--follow", "--interval", "0.1"], cwd=world.repo,
+                         env=world.env, stdout=wr, stderr=subprocess.PIPE, text=True)
+    os.close(wr)
+    time.sleep(0.4)
+    os.close(rd)
+    drop(box, "a-100", "first\n")
+    assert p.wait(timeout=5) != 0
+    assert (box / "a-100").read_text() == "first\n"
+    assert not list((box / "read").iterdir()) if (box / "read").exists() else True
