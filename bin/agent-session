@@ -329,8 +329,10 @@ print_reports() { # print_reports <entries>: claim each report by moving it to r
       echo "agent-session: can't read $dest" >&2
       continue
     fi
-    # cmd_inbox ignores SIGPIPE, so a closed reader fails the write here instead of killing us
-    # with the report already archived: put it back unread and stop.
+    # cmd_inbox ignores SIGPIPE, so a write to a reader that has already gone fails here instead
+    # of killing us with the report archived: put that report back unread and stop. This can't
+    # save reports the pipe buffer already accepted before the reader went (`inbox | head`
+    # archives everything it wrote); only a reader that stays alive sees every report.
     if ! printf '== %s\n%s\n' "$name" "${body%.}" 2>/dev/null; then
       mv "$dest" "$f" 2>/dev/null || true
       echo "agent-session: output closed; left $name in the inbox" >&2

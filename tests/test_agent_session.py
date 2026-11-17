@@ -1043,7 +1043,8 @@ def test_closed_output_leaves_reports_unread(world, box):
                            stderr=subprocess.PIPE, text=True, timeout=10)
     finally:
         os.close(wr)
-    assert p.returncode != 0
+    assert p.returncode == 1
+    assert "agent-session: output closed; left a-100 in the inbox\n" in p.stderr
     assert sorted(x.name for x in box.iterdir() if x.name != "read") == ["a-100", "b-200"]
     assert not (box / "read").exists() or not list((box / "read").iterdir())
 
@@ -1056,6 +1057,7 @@ def test_follow_whose_reader_exits_leaves_the_report_unread(world, box):
     time.sleep(0.4)
     os.close(rd)
     drop(box, "a-100", "first\n")
-    assert p.wait(timeout=5) != 0
+    assert p.wait(timeout=5) == 1
+    assert "agent-session: output closed; left a-100 in the inbox\n" in p.stderr.read()
     assert (box / "a-100").read_text() == "first\n"
     assert not list((box / "read").iterdir()) if (box / "read").exists() else True

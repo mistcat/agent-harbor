@@ -249,6 +249,11 @@ nothing while the inbox is empty, and runs until SIGINT or SIGTERM. `agent-sessi
 one-shot form: it blocks until there is a report, prints that batch and exits (exit 2 after `--timeout`
 seconds, default 3600). `--follow` and `--wait` can't be combined.
 
+Read the output with something that keeps reading until the command ends, such as a terminal or
+Claude Code's Monitor tool, not `| head`. A report counts as read once it is written to the output: if the
+reader has already gone, that write fails, the report goes back to the inbox and the command exits 1. But
+reports already accepted by a pipe's buffer when the reader quits are archived unseen.
+
 The controller runs on Sonnet with a Fable advisor. Override with `AGENT_SESSION_CONTROLLER_MODEL` and
 `AGENT_SESSION_ADVISOR_MODEL`, or set `CONTROLLER_MODEL` / `ADVISOR_MODEL` in the project config. Its standing
 practice is [agent_panel/assets/controller-practice.md](agent_panel/assets/controller-practice.md).
