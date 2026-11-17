@@ -5,7 +5,10 @@ panes. Rex is a terminal app by [Superlogical](https://www.superlogical.com/), c
 ([announcement](https://www.superlogical.com/updates/public-testing-beginning)).
 
 ## Simple agent table with token burn, effort, etc.
+The boring view...
 ![Key info about your agent situation at a glance](media/agent-harbor-agent-table.png)
+
+But why not visit the harbor????!!???
 
 ## See the harbor in action
 
