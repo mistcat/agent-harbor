@@ -124,7 +124,7 @@ def attention_call(f: int):
     elif f < 55:
         caption = "The turn ends: the ship drops anchor and the captain dozes (zzz)."
     else:
-        caption = SOUND + 'BOOM (a deep cannon), or "Ahoy, matey!": your turn.'
+        caption = SOUND + 'A few quiet seconds on: BOOM (a deep cannon), or "Ahoy, matey!". Your turn.'
     return agents, caption, 0
 
 
