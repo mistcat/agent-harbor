@@ -228,7 +228,8 @@ def test_controller_passes_model_advisor_and_rules(world):
     assert json.loads(args[args.index("--settings") + 1]) == {"advisorModel": "fable"}
     prompt = args[-1]
     assert "CONTROLLER-MARKER: no live writes." in prompt
-    assert "agent-session inbox --wait" in prompt
+    assert "agent-session inbox --follow" in prompt
+    assert "inbox --wait" not in prompt
     assert "bin/agent-session" not in prompt
     assert "trunk" in prompt
     assert world.rex_call("new")[1] == "proj-controller"
@@ -579,7 +580,8 @@ def test_rexclaude_default_in_repo_runs_controller(world):
 def test_rexclaude_extra_prompt_is_appended_to_controller_prompt(world):
     assert rexclaude(world, "focus", "on", "billing").returncode == 0
     prompt = agent_args(world.rex_call("new"))[-1]
-    assert "agent-session inbox --wait" in prompt
+    assert "agent-session inbox --follow" in prompt
+    assert "inbox --wait" not in prompt
     assert prompt.rstrip().endswith("focus on billing")
     assert prompt.index("focus on billing") > prompt.index("Call the advisor")
 
@@ -724,3 +726,338 @@ def test_rexclaude_solo_ignores_opt_in(world):
     git(world.repo, "config", "--local", "agent-session.useProjectScript", "true")
     assert rexclaude(world, "--solo").returncode == 0
     assert not out.exists() and world.rex_call("new")[1] == "proj-solo"
+
+
+# --- inbox --follow -------------------------------------------------------------------------
+
+import queue
+import signal
+import threading
+import time
+
+
+class Follower:
+    """`agent-session inbox --follow` running in the background, its stdout read line by line."""
+
+    def __init__(self, world, *extra):
+        self.proc = subprocess.Popen(
+            [str(SESSION), "inbox", "--follow", "--interval", "0.2", *extra],
+            cwd=world.repo, env=world.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.lines = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self):
+        for line in self.proc.stdout:
+            self.lines.put(line)
+
+    def read(self, n, timeout=5):
+        out = []
+        for _ in range(n):
+            out.append(self.lines.get(timeout=timeout))
+        return "".join(out)
+
+    def quiet(self, seconds=0.6):
+        time.sleep(seconds)
+        return self.lines.empty()
+
+    @staticmethod
+    def eventually(check, timeout=5):
+        end = time.monotonic() + timeout
+        while not check():
+            assert time.monotonic() < end, "timed out"
+            time.sleep(0.05)
+        return True
+
+    def stop(self, sig=signal.SIGTERM):
+        if self.proc.poll() is None:
+            self.proc.send_signal(sig)
+        return self.proc.wait(timeout=5)
+
+
+@pytest.fixture
+def follow(world):
+    inbox = world.tmp / "box"
+    inbox.mkdir()
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    started = []
+
+    def start(*extra):
+        f = Follower(world, *extra)
+        started.append(f)
+        return f
+
+    yield inbox, start
+    for f in started:
+        if f.proc.poll() is None:
+            f.proc.kill()
+            f.proc.wait()
+
+
+def test_follow_prints_report_that_arrives_later_and_archives_it(follow):
+    inbox, start = follow
+    f = start()
+    assert f.quiet()  # nothing yet, and no "no new agent reports" line
+    (inbox / "alpha-1700000000").write_text("alpha stopped\n")
+    assert f.read(3) == "== alpha-1700000000\nalpha stopped\n\n"
+    assert f.eventually((inbox / "read" / "alpha-1700000000").exists)
+    assert not (inbox / "alpha-1700000000").exists()
+    assert f.quiet()
+    assert f.proc.poll() is None  # still following
+    assert f.stop() == 0
+
+
+def drop(inbox, name, text):
+    """Write a report the way agent-stop-hook does: a dotted temp file, then a rename."""
+    tmp = inbox / f".{name}.tmp"
+    tmp.write_text(text)
+    tmp.rename(inbox / name)
+
+
+def test_follow_prints_two_reports_in_one_interval_oldest_first_once(follow):
+    inbox, start = follow
+    inbox.rmdir()
+    f = start("--interval", "1")
+    time.sleep(0.3)
+    # Both reports appear in one rename of the whole folder, so no listing can see just one.
+    staging = inbox.with_name("staging")
+    staging.mkdir()
+    drop(staging, "b-200", "second\n")
+    drop(staging, "a-100", "first\n")
+    staging.rename(inbox)
+    assert f.read(6) == "== a-100\nfirst\n\n== b-200\nsecond\n\n"
+    assert f.quiet(1.5)
+    assert sorted(p.name for p in (inbox / "read").iterdir()) == ["a-100", "b-200"]
+    f.stop()
+
+
+def test_follow_survives_a_competing_plain_inbox_and_each_report_prints_once(follow, world):
+    inbox, start = follow
+    f = start("--interval", "0.02")
+    names = [f"r{i:02d}-{1000 + i}" for i in range(40)]
+    plain = []
+    for i, name in enumerate(names):
+        drop(inbox, name, f"body {name}\n")
+        if i % 2:
+            plain.append(world.session("inbox").stdout)
+        time.sleep(0.01)
+    time.sleep(0.5)
+    assert f.proc.poll() is None, f.proc.stderr.read()
+    printed = []
+    while not f.lines.empty():
+        printed.append(f.lines.get())
+    out = "".join(printed) + "".join(plain)
+    for name in names:
+        assert out.count(f"== {name}\n") == 1, name
+        assert out.count(f"body {name}\n") == 1, name
+    assert sorted(p.name for p in (inbox / "read").iterdir()) == sorted(names)
+    assert f.stop() == 0
+
+
+def test_follow_skips_an_unreadable_report_and_keeps_going(follow):
+    inbox, start = follow
+    drop(inbox, "bad-100", "secret\n")
+    (inbox / "bad-100").chmod(0)
+    f = start("--interval", "0.1")
+    assert f.quiet(0.8)
+    assert f.proc.poll() is None
+    drop(inbox, "good-200", "fine\n")
+    assert f.read(3) == "== good-200\nfine\n\n"
+    assert (inbox / "bad-100").exists()  # left for a human, not archived unprinted
+    assert f.stop() == 0
+    err = f.proc.stderr.read()
+    assert err.count("bad-100") == 1, err  # warned once, not every interval
+    (inbox / "bad-100").chmod(0o644)
+
+
+def test_archiving_never_overwrites_an_earlier_report_of_the_same_name(world):
+    inbox = world.tmp / "box"
+    (inbox / "read").mkdir(parents=True)
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    (inbox / "read" / "a-100").write_text("earlier\n")
+    (inbox / "read" / "a-100.1").write_text("earlier too\n")
+    (inbox / "a-100").write_text("later\n")
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "== a-100\nlater\n\n")
+    assert (inbox / "read" / "a-100").read_text() == "earlier\n"
+    assert (inbox / "read" / "a-100.1").read_text() == "earlier too\n"
+    assert (inbox / "read" / "a-100.2").read_text() == "later\n"
+
+
+def test_follow_prints_reports_already_waiting(follow):
+    inbox, start = follow
+    (inbox / "a-100").write_text("waiting\n")
+    f = start()
+    assert f.read(3) == "== a-100\nwaiting\n\n"
+    f.stop()
+
+
+def test_follow_waits_for_an_inbox_that_does_not_exist_yet(follow):
+    inbox, start = follow
+    inbox.rmdir()  # the controller starts the watcher before any agent has stopped
+    f = start()
+    assert f.quiet()
+    assert f.proc.poll() is None
+    inbox.mkdir()
+    (inbox / "alpha-100").write_text("first stop\n")
+    assert f.read(3) == "== alpha-100\nfirst stop\n\n"
+    assert f.eventually((inbox / "read" / "alpha-100").exists)
+    assert f.stop() == 0
+
+
+def test_follow_ignores_dotfile_temp_until_renamed(follow):
+    inbox, start = follow
+    f = start()
+    tmp = inbox / ".alpha-300.tmp"
+    tmp.write_text("whole report\n")
+    assert f.quiet()
+    assert tmp.exists()
+    tmp.rename(inbox / "alpha-300")
+    assert f.read(3) == "== alpha-300\nwhole report\n\n"
+    assert f.quiet()
+    f.stop()
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_follow_exits_promptly_on_signal(follow, sig):
+    inbox, start = follow
+    f = start("--interval", "30")
+    time.sleep(0.5)
+    t0 = time.monotonic()
+    assert f.stop(sig) == 0
+    assert time.monotonic() - t0 < 3
+    assert f.proc.stderr.read() == ""
+
+
+def test_follow_and_wait_are_mutually_exclusive(world):
+    for args in (("--follow", "--wait"), ("--wait", "--follow")):
+        r = world.session("inbox", *args)
+        assert r.returncode != 0
+        assert "--follow and --wait" in r.stderr
+        assert r.stdout == ""
+
+
+@pytest.mark.parametrize("bad", ["0", "abc", "-1", ""])
+def test_follow_rejects_bad_interval(world, bad):
+    r = world.session("inbox", "--follow", "--interval", bad)
+    assert r.returncode != 0
+    assert "--interval" in r.stderr
+
+
+def test_timeout_does_not_go_with_follow(world):
+    r = world.session("inbox", "--follow", "--timeout", "5")
+    assert r.returncode != 0
+    assert "--timeout" in r.stderr
+
+
+def test_interval_needs_follow(world):
+    r = world.session("inbox", "--interval", "2")
+    assert r.returncode != 0
+    assert "--interval" in r.stderr
+
+
+def test_plain_inbox_and_wait_output_unchanged(world):
+    inbox = world.tmp / "box"
+    inbox.mkdir()
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    (inbox / "b-200").write_text("second\n")
+    (inbox / "a-100").write_text("first\n")
+    (inbox / ".c-50.tmp").write_text("partial\n")
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "== a-100\nfirst\n\n== b-200\nsecond\n\n", "")
+    assert (inbox / ".c-50.tmp").exists()
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+    (inbox / "d-300").write_text("third\n")
+    r = world.session("inbox", "--wait", "--timeout", "5")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "== d-300\nthird\n\n", "")
+    r = world.session("inbox", "--wait", "--timeout", "0")
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr == "agent-session: no agent reports after 0s\n"
+
+
+def unreadable(inbox, name):
+    drop(inbox, name, "secret\n")
+    (inbox / name).chmod(0)
+
+
+@pytest.fixture
+def box(world):
+    inbox = world.tmp / "box"
+    inbox.mkdir()
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    yield inbox
+    for p in inbox.iterdir():
+        p.chmod(0o755 if p.is_dir() else 0o644)
+
+
+def test_wait_keeps_waiting_past_an_unreadable_report(world, box):
+    unreadable(box, "bad-100")
+    t0 = time.monotonic()
+    r = world.session("inbox", "--wait", "--timeout", "3")
+    assert time.monotonic() - t0 >= 2.5
+    assert (r.returncode, r.stdout) == (2, "")
+    assert r.stderr.count("bad-100") == 1, r.stderr  # warned once, not every pass
+    assert r.stderr.endswith("agent-session: no agent reports after 3s\n")
+
+
+def test_wait_prints_a_report_that_arrives_after_an_unreadable_one(world, box):
+    unreadable(box, "bad-100")
+    p = subprocess.Popen([str(SESSION), "inbox", "--wait", "--timeout", "20"], cwd=world.repo,
+                         env=world.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(1)
+    assert p.poll() is None
+    drop(box, "good-200", "fine\n")
+    out, _ = p.communicate(timeout=10)
+    assert (p.returncode, out) == (0, "== good-200\nfine\n\n")
+
+
+def test_plain_inbox_says_no_reports_when_it_could_print_none(world, box):
+    unreadable(box, "bad-100")
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+    assert "bad-100" in r.stderr
+
+
+def test_plain_inbox_says_no_reports_when_another_reader_claimed_them(world, box):
+    # A report listed but gone before the move: simulate the follower winning the race with a
+    # fake mv that archives the file itself and then fails, as a losing mv would.
+    drop(box, "a-100", "first\n")
+    fake = world.tmp / "racebin"
+    fake.mkdir()
+    mv = fake / "mv"
+    mv.write_text('#!/bin/sh\nmkdir -p "$(dirname "$2")"\n/bin/mv "$1" "$2"\nexit 1\n')
+    mv.chmod(0o755)
+    world.env["PATH"] = f"{fake}:{world.env['PATH']}"
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+
+
+def test_closed_output_leaves_reports_unread(world, box):
+    drop(box, "a-100", "first\n")
+    drop(box, "b-200", "second\n")
+    rd, wr = os.pipe()
+    os.close(rd)  # the reader is gone before anything is written
+    try:
+        p = subprocess.run([str(SESSION), "inbox"], cwd=world.repo, env=world.env, stdout=wr,
+                           stderr=subprocess.PIPE, text=True, timeout=10)
+    finally:
+        os.close(wr)
+    assert p.returncode == 1
+    assert "agent-session: output closed; left a-100 in the inbox\n" in p.stderr
+    assert sorted(x.name for x in box.iterdir() if x.name != "read") == ["a-100", "b-200"]
+    assert not (box / "read").exists() or not list((box / "read").iterdir())
+
+
+def test_follow_whose_reader_exits_leaves_the_report_unread(world, box):
+    rd, wr = os.pipe()
+    p = subprocess.Popen([str(SESSION), "inbox", "--follow", "--interval", "0.1"], cwd=world.repo,
+                         env=world.env, stdout=wr, stderr=subprocess.PIPE, text=True)
+    os.close(wr)
+    time.sleep(0.4)
+    os.close(rd)
+    drop(box, "a-100", "first\n")
+    assert p.wait(timeout=5) == 1
+    assert "agent-session: output closed; left a-100 in the inbox\n" in p.stderr.read()
+    assert (box / "a-100").read_text() == "first\n"
+    assert not list((box / "read").iterdir()) if (box / "read").exists() else True
