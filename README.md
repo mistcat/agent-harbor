@@ -4,6 +4,32 @@ Tooling for watching and running Claude Code agents in [Rex](https://www.superlo
 panes. Rex is a terminal app by [Superlogical](https://www.superlogical.com/), currently in public testing
 ([announcement](https://www.superlogical.com/updates/public-testing-beginning)).
 
+## See it in action
+
+`agent-panel`'s harbor in four made-up scenarios. The panel plays sounds; here a caption says what you would hear.
+
+**Busy morning:** the main session's ship (the captain on its stern) sails out, subagents put out after it, and
+each one moors at the pier when it finishes.
+
+![Busy morning: subagents sail out and moor at the pier](media/busy-morning.gif)
+
+**Crowded harbor:** several worktree agents, each labeled with its ticket id; the main session's ship reads
+Captain and its own subagents read crew.
+
+![Crowded harbor: worktree ships labeled def-127, def-128, feat-255 and def-131](media/crowded-harbor.gif)
+
+**Advisor call:** the captain fires the cannon.
+
+![Advisor call: the captain fires the cannon](media/advisor-call.gif)
+
+**Your turn:** the main session's turn ends, the ship drops anchor, and the attention call sounds.
+
+![Your turn: the ship drops anchor and the attention call sounds](media/attention-call.gif)
+
+MP4 versions: [busy morning](media/busy-morning.mp4), [crowded harbor](media/crowded-harbor.mp4),
+[advisor call](media/advisor-call.mp4), [your turn](media/attention-call.mp4). They are made by
+`scripts/make_harbor_gifs.py` (needs Pillow and ffmpeg).
+
 ## Requirements
 
 Developed and tested on macOS. I haven't tested other platforms.
