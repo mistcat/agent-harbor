@@ -26,8 +26,6 @@ Captain and its own subagents read crew.
 
 ![Your turn: the ship stops, the captain dozes and the attention call sounds](media/attention-call.gif)
 
-Their quiet background of ocean waves is "oceanwaves-10" by Rmutt (Freesound, CC0); see `media/mobile/CREDITS.md`.
-
 ## Requirements
 
 Developed and tested on macOS. I haven't tested other platforms.
