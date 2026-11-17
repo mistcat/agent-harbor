@@ -4,7 +4,10 @@ Tooling for watching and running Claude Code agents in [Rex](https://www.superlo
 panes. Rex is a terminal app by [Superlogical](https://www.superlogical.com/), currently in public testing
 ([announcement](https://www.superlogical.com/updates/public-testing-beginning)).
 
-## See it in action
+## Simple agent table with token burn, effort, etc.
+![Key info about your agent situation at a glance](media/agent-harbor-agent-table.png)
+
+## See the harbor in action
 
 `agent-panel`'s harbor in four made-up scenarios. The panel plays sounds; here a caption says what you would hear.
 
