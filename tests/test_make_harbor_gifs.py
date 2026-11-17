@@ -91,3 +91,129 @@ def test_advisor_call_fires_the_cannon():
 def test_attention_call_ends_at_anchor():
     cells, _ = gifs.frames("attention-call")[-1]
     assert "zzz" in "\n".join("".join(ch for ch, _ in row) for row in cells)
+
+
+# Mobile: 4:5 portrait MP4s with sound, the harbor at MOBILE_COLS columns, cropped to its lower rows.
+
+def test_mobile_frame_is_4_by_5_with_even_sides():
+    w, h = gifs.MOBILE_SIZE
+    assert (w, h) == (1080, 1350) and w * 5 == h * 4 and w % 2 == h % 2 == 0
+
+
+def test_mobile_layout_leaves_the_top_band_clear_and_fits_the_frame():
+    w, h = gifs.MOBILE_SIZE
+    harbor_h = (gifs.ROWS - gifs.MOBILE_CROP) * gifs.MOBILE_CELL[1]
+    assert gifs.MOBILE_HARBOR_Y >= h // 5  # the band the post's headline goes in
+    assert gifs.MOBILE_X + gifs.MOBILE_COLS * gifs.MOBILE_CELL[0] <= w - gifs.MOBILE_X
+    assert gifs.MOBILE_HARBOR_Y + harbor_h <= gifs.MOBILE_TITLE_Y
+    assert gifs.MOBILE_CAPTION_Y + gifs.MOBILE_CAPTION_LINES * gifs.MOBILE_LINE_H <= h
+    assert gifs.MOBILE_CAPTION_CHARS * gifs.MOBILE_TEXT_CELL[0] <= w - 2 * gifs.MOBILE_X
+    assert gifs.MOBILE_TEXT_SIZE >= 40
+
+
+def _mobile_plain(name):
+    return ["\n".join("".join(ch for ch, _ in row) for row in cells) for cells, _ in gifs.mobile_frames(name)]
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_mobile_crop_only_drops_empty_sky(name):
+    for cells, _ in gifs.frames(name, gifs.MOBILE_COLS):
+        assert all(ch == " " for row in cells[:gifs.MOBILE_CROP] for ch, _ in row)
+    for cells, _ in gifs.mobile_frames(name):
+        assert len(cells) == gifs.ROWS - gifs.MOBILE_CROP and all(len(row) == gifs.MOBILE_COLS for row in cells)
+
+
+def test_mobile_crowded_harbor_labels_never_touch_a_wake():
+    for cells, _ in gifs.mobile_frames("crowded-harbor"):
+        for row in cells[:-1]:
+            for (a, sa), (b, sb) in zip(row, row[1:]):
+                wake_a, wake_b = a in WAKE and sa != LABEL_STYLE, b in WAKE and sb != LABEL_STYLE
+                assert not (sa == LABEL_STYLE and wake_b or wake_a and sb == LABEL_STYLE), "".join(c for c, _ in row)
+
+
+def test_mobile_crowded_harbor_shows_every_label():
+    text = "\n".join(_mobile_plain("crowded-harbor"))
+    for label in ("Captain", "crew", "def-127", "def-128", "feat-255"):
+        assert label in text
+    assert "more" not in text
+
+
+def test_mobile_busy_morning_pile_shows_each_moored_boat():
+    cells, _ = gifs.frames("busy-morning", gifs.MOBILE_COLS)[-1]
+    pile = range(dock_x(gifs.MOBILE_COLS), gifs.MOBILE_COLS - dock_size(gifs.MOBILE_COLS)[1])
+    sails = {cells[y][x][1] for y in range(hull_row(gifs.ROWS, 0, False) + 1) for x in pile if cells[y][x][0] == SAIL}
+    assert len(sails) == 3
+
+
+def test_mobile_advisor_call_fires_the_cannon():
+    plain = _mobile_plain("advisor-call")
+    assert any("Fire!" in p and "✸" in p for p in plain)
+
+
+def _mobile_captions(name):
+    return [caption for _, caption in gifs.mobile_frames(name)]
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_mobile_captions_wrap_into_the_caption_block_and_stay_up_long_enough(name):
+    for caption, run in itertools.groupby(_mobile_captions(name)):
+        lines = gifs.wrap_caption(caption)
+        assert 1 <= len(lines) <= gifs.MOBILE_CAPTION_LINES, caption
+        assert all(len(line) <= gifs.MOBILE_CAPTION_CHARS for line in lines)
+        assert " ".join(lines) == caption
+        assert len(list(run)) >= max(4.5, len(caption) / 14) * gifs.FPS, caption
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_mobile_captions_never_say_there_is_no_sound(name):
+    assert not any("GIF" in c or "no sound" in c for c in _mobile_captions(name))
+
+
+def test_wide_captions_are_unchanged():
+    assert any("GIFs have no sound" in c for _, c in gifs.frames("attention-call"))
+
+
+def test_mobile_attention_call_plays_the_boom_then_the_ahoy_at_their_captions():
+    cues = gifs.sound_cues("attention-call")
+    assert [(f, w.name) for f, w in cues] == [(140, "attention.wav"), (210, "ahoy.wav")]
+    shown = dict((f, c) for f, (_, c) in enumerate(gifs.mobile_frames("attention-call")))
+    assert "boom" in shown[140].lower() and "Ah-hoy, may-tee" in shown[210]
+
+
+def test_mobile_advisor_call_booms_once_per_poll_like_the_panel():
+    """Two calls in one poll fire two shots but play one boom (the app's Boomer), as the caption says."""
+    assert [(f, w.name) for f, w in gifs.sound_cues("advisor-call")] == [(f, "cannon.wav") for f in sorted(gifs.FIRES)]
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_every_sound_caption_starts_with_its_cue(name):
+    captions = _mobile_captions(name)
+    starts = [f for f, c in enumerate(captions) if c.startswith(gifs.SOUND) and (f == 0 or captions[f - 1] != c)]
+    assert starts == [f for f, _ in gifs.sound_cues(name)]
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_sound_cues_end_inside_the_clip(name):
+    import wave
+
+    count = gifs.SCENARIOS[name][1]
+    for f, wav in gifs.sound_cues(name):
+        with wave.open(str(wav)) as w:
+            length = w.getnframes() / w.getframerate()
+        assert wav.is_file() and 0 <= f < count and f / gifs.FPS + length + 0.5 <= count / gifs.FPS
+
+
+def test_mix_delays_each_cue_to_its_frame():
+    graph = gifs.mix_filter("attention-call")
+    assert "adelay=14000|14000" in graph and "adelay=21000|21000" in graph
+    assert "normalize=0" in graph and f"atrim=duration={270 / gifs.FPS}" in graph
+
+
+def test_mix_without_cues_is_the_bed_alone():
+    graph = gifs.mix_filter("busy-morning")
+    assert "adelay" not in graph and f"atrim=duration={210 / gifs.FPS}" in graph
+
+
+def test_missing_bed_exits_with_a_clear_message(tmp_path):
+    with pytest.raises(SystemExit, match="background track"):
+        gifs.check_bed(tmp_path / "nope.ogg")
