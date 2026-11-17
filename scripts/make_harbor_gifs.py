@@ -70,16 +70,16 @@ def _caption(f: int, timeline: list[tuple[int, str]]) -> str:
 def busy_morning(f: int):
     # The first to finish is the biggest, so in the moored pile (newest on top, two columns apart) each of
     # the three stays visible; two sloops side by side would merge into one block of sail.
-    subs = [("builder", "sonnet 5.5", 30, 75, 80_000), ("scout", "haiku 4.5", 40, 95, 10_000),
-            ("reviewer", "opus 5.5", 50, 115, 10_000)]
+    subs = [("builder", "sonnet 5.5", 50, 100, 80_000), ("scout", "haiku 4.5", 60, 120, 10_000),
+            ("reviewer", "opus 5.5", 70, 140, 10_000)]
     agents = [agent("main", model="opus 5.5", burn=400_000)]
     agents += [agent(n, "main", model=m, burn=b, status=_span(f, s, e), finished_at=e / FPS)
                for n, m, s, e, b in subs if f >= s]
     return agents, _caption(f, [
         (0, "Morning. The captain's ship sails out: the main session is working."),
-        (30, "Subagents put out one by one, each sail colored by its model."),
-        (75, "As each one finishes it moors at the pier, the newest on top."),
-        (120, "The finished boats stack in a pile at the pier. The captain sails on."),
+        (50, "Subagents put out one by one, each sail colored by its model."),
+        (100, "As each one finishes it moors at the pier, the newest on top."),
+        (150, "All the building work is done. The captain is ready to deliver it."),
     ]), 0
 
 
@@ -97,42 +97,42 @@ def crowded_harbor(f: int):
         agents.append(agent(f"{name}/main", model=model, burn=burn, ship=name))
     return agents, _caption(f, [
         (0, "Three worktree agents share the harbor, each labeled with its ticket id."),
-        (35, "The main session's ship reads Captain; its own subagents read crew."),
-        (70, "A crew boat that has finished is moored at the pier, still labeled crew."),
+        (55, "The main session's ship reads Captain; its own subagents read crew."),
+        (110, "A crew boat that has finished is moored at the pier, still labeled crew."),
     ]), 0
 
 
-FIRES = {30: 1, 95: 2}  # frame -> advisor calls landing in that poll
+FIRES = {45: 1, 160: 2}  # frame -> advisor calls landing in that poll
 
 
 def advisor_call(f: int):
     agents = [agent("main", model="opus 5.5", burn=400_000), agent("builder", "main", model="sonnet 5.5", burn=80_000)]
     return agents, _caption(f, [
         (0, "The main session is working, with a subagent in tow."),
-        (30, SOUND + "BOOM! An advisor call: the captain fires the cannon, and the shot splashes down."),
-        (65, "The captain sails on until the next advisor call."),
-        (95, SOUND + "BOOM! Two advisor calls in one poll: two shots, one boom."),
+        (45, SOUND + "BOOM! An advisor call: the captain fires, and the cannonball splashes into the sea."),
+        (110, "The captain sails on until the next advisor call."),
+        (160, SOUND + "BOOM! Two advisor calls in one poll: two shots, one boom."),
     ]), FIRES.get(f, 0)
 
 
 def attention_call(f: int):
-    agents = [agent("main", model="opus 5.5", burn=400_000, status="idle" if f >= 65 else "running"),
-              agent("builder", "main", model="sonnet 5.5", burn=80_000, status=_span(f, 0, 35), finished_at=3.5)]
+    agents = [agent("main", model="opus 5.5", burn=400_000, status="idle" if f >= 90 else "running"),
+              agent("builder", "main", model="sonnet 5.5", burn=80_000, status=_span(f, 0, 45), finished_at=4.5)]
     return agents, _caption(f, [
         (0, "The main session works with one subagent."),
-        (35, "The subagent finishes and moors at the pier."),
-        (65, "The turn ends: the ship stops and the captain dozes (zzz)."),
-        (100, SOUND + 'A few quiet seconds later the panel calls you: BOOM (a deep cannon) or "Ahoy, matey!"'),
-        (135, SOUND + "GIFs have no sound, so this caption stands in for the call. Your turn."),
+        (45, "The subagent finishes and moors at the pier."),
+        (90, "The turn ends: the ship stops and the captain dozes (zzz)."),
+        (140, SOUND + 'A few quiet seconds later the panel calls you: BOOM (a deep cannon) or "Ahoy, matey!"'),
+        (210, SOUND + "GIFs have no sound, so this caption stands in for the call. Your turn."),
     ]), 0
 
 
 # name -> (title, frames, script)
 SCENARIOS = {
-    "busy-morning": ("Busy morning", 160, busy_morning),
-    "crowded-harbor": ("Crowded harbor", 105, crowded_harbor),
-    "advisor-call": ("Advisor call", 135, advisor_call),
-    "attention-call": ("Your turn", 165, attention_call),
+    "busy-morning": ("Busy morning", 210, busy_morning),
+    "crowded-harbor": ("Crowded harbor", 170, crowded_harbor),
+    "advisor-call": ("Advisor call", 220, advisor_call),
+    "attention-call": ("Your turn", 270, attention_call),
 }
 
 

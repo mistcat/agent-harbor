@@ -60,10 +60,11 @@ def test_busy_morning_pile_shows_each_moored_boat():
 
 
 @pytest.mark.parametrize("name", list(gifs.SCENARIOS))
-def test_every_caption_shows_long_enough_to_read(name):
+def test_every_caption_shows_long_enough_for_a_slow_reader(name):
+    """At least 4.5 s each, and longer for long captions: 14 characters a second."""
     shown = [caption for _, caption in gifs.frames(name)]
-    runs = [len(list(g)) for _, g in itertools.groupby(shown)]
-    assert min(runs) >= 2.5 * gifs.FPS
+    for caption, run in itertools.groupby(shown):
+        assert len(list(run)) >= max(4.5, len(caption) / 14) * gifs.FPS, caption
 
 
 def test_crowded_harbor_labels_never_touch_a_wake():
