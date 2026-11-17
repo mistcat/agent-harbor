@@ -807,16 +807,81 @@ def test_follow_prints_report_that_arrives_later_and_archives_it(follow):
     assert f.stop() == 0
 
 
+def drop(inbox, name, text):
+    """Write a report the way agent-stop-hook does: a dotted temp file, then a rename."""
+    tmp = inbox / f".{name}.tmp"
+    tmp.write_text(text)
+    tmp.rename(inbox / name)
+
+
 def test_follow_prints_two_reports_in_one_interval_oldest_first_once(follow):
     inbox, start = follow
+    inbox.rmdir()
     f = start("--interval", "1")
     time.sleep(0.3)
-    (inbox / "b-200").write_text("second\n")
-    (inbox / "a-100").write_text("first\n")
+    # Both reports appear in one rename of the whole folder, so no listing can see just one.
+    staging = inbox.with_name("staging")
+    staging.mkdir()
+    drop(staging, "b-200", "second\n")
+    drop(staging, "a-100", "first\n")
+    staging.rename(inbox)
     assert f.read(6) == "== a-100\nfirst\n\n== b-200\nsecond\n\n"
     assert f.quiet(1.5)
     assert sorted(p.name for p in (inbox / "read").iterdir()) == ["a-100", "b-200"]
     f.stop()
+
+
+def test_follow_survives_a_competing_plain_inbox_and_each_report_prints_once(follow, world):
+    inbox, start = follow
+    f = start("--interval", "0.02")
+    names = [f"r{i:02d}-{1000 + i}" for i in range(40)]
+    plain = []
+    for i, name in enumerate(names):
+        drop(inbox, name, f"body {name}\n")
+        if i % 2:
+            plain.append(world.session("inbox").stdout)
+        time.sleep(0.01)
+    time.sleep(0.5)
+    assert f.proc.poll() is None, f.proc.stderr.read()
+    printed = []
+    while not f.lines.empty():
+        printed.append(f.lines.get())
+    out = "".join(printed) + "".join(plain)
+    for name in names:
+        assert out.count(f"== {name}\n") == 1, name
+        assert out.count(f"body {name}\n") == 1, name
+    assert sorted(p.name for p in (inbox / "read").iterdir()) == sorted(names)
+    assert f.stop() == 0
+
+
+def test_follow_skips_an_unreadable_report_and_keeps_going(follow):
+    inbox, start = follow
+    drop(inbox, "bad-100", "secret\n")
+    (inbox / "bad-100").chmod(0)
+    f = start("--interval", "0.1")
+    assert f.quiet(0.8)
+    assert f.proc.poll() is None
+    drop(inbox, "good-200", "fine\n")
+    assert f.read(3) == "== good-200\nfine\n\n"
+    assert (inbox / "bad-100").exists()  # left for a human, not archived unprinted
+    assert f.stop() == 0
+    err = f.proc.stderr.read()
+    assert err.count("bad-100") == 1, err  # warned once, not every interval
+    (inbox / "bad-100").chmod(0o644)
+
+
+def test_archiving_never_overwrites_an_earlier_report_of_the_same_name(world):
+    inbox = world.tmp / "box"
+    (inbox / "read").mkdir(parents=True)
+    world.env["AGENT_SESSION_INBOX"] = str(inbox)
+    (inbox / "read" / "a-100").write_text("earlier\n")
+    (inbox / "read" / "a-100.1").write_text("earlier too\n")
+    (inbox / "a-100").write_text("later\n")
+    r = world.session("inbox")
+    assert (r.returncode, r.stdout) == (0, "== a-100\nlater\n\n")
+    assert (inbox / "read" / "a-100").read_text() == "earlier\n"
+    assert (inbox / "read" / "a-100.1").read_text() == "earlier too\n"
+    assert (inbox / "read" / "a-100.2").read_text() == "later\n"
 
 
 def test_follow_prints_reports_already_waiting(follow):

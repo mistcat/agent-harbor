@@ -304,21 +304,38 @@ inbox_entries() { # unread reports, oldest first (by the <epoch> suffix the hook
   done | sort -n | cut -d' ' -f2-
 }
 
-print_reports() { # print_reports <entries>: print each report, then move it to read/
-  local f
+WARNED=$'\n' # reports already warned about, one per line, so a stuck one warns only once
+
+print_reports() { # print_reports <entries>: claim each report by moving it to read/, then print it
+  local f name dest n body
   mkdir -p "$INBOX/read"
   while IFS= read -r f; do
-    echo "== $(basename "$f")"
-    cat "$f"
-    echo
-    mv "$f" "$INBOX/read/"
+    name="$(basename "$f")"
+    if [[ ! -r "$f" ]]; then # gone (another reader got it) or unreadable: leave it, skip it
+      if [[ -e "$f" && "$WARNED" != *$'\n'"$f"$'\n'* ]]; then
+        echo "agent-session: can't read $f; leaving it in the inbox" >&2
+        WARNED+="$f"$'\n'
+      fi
+      continue
+    fi
+    # Never overwrite an archived report (the same agent can stop twice in one second).
+    dest="$INBOX/read/$name"; n=1
+    while [[ -e "$dest" ]]; do dest="$INBOX/read/$name.$n"; n=$((n + 1)); done
+    # The move is the claim: if another reader moved it first, it prints there, not here.
+    mv "$f" "$dest" 2>/dev/null || continue
+    if ! body="$(cat "$dest" && echo .)"; then
+      echo "agent-session: can't read $dest" >&2
+      continue
+    fi
+    printf '== %s\n%s\n' "$name" "${body%.}"
   done <<<"$1"
 }
 
 follow_inbox() { # follow_inbox <interval>: print reports as they land until SIGINT/SIGTERM
   local interval="$1" entries stop=0 sleeper=""
   # The trap only sets a flag (and cuts the sleep short), so a report being printed is
-  # always moved to read/ before we exit: never lost, never printed twice.
+  # always finished before we exit. print_reports claims each report before printing it,
+  # so one running alongside a plain `inbox` never prints a report twice.
   trap 'stop=1; [[ -z "$sleeper" ]] || kill "$sleeper" 2>/dev/null || true' INT TERM
   while [[ "$stop" == 0 ]]; do
     entries="$(inbox_entries)"
