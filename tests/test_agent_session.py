@@ -827,6 +827,19 @@ def test_follow_prints_reports_already_waiting(follow):
     f.stop()
 
 
+def test_follow_waits_for_an_inbox_that_does_not_exist_yet(follow):
+    inbox, start = follow
+    inbox.rmdir()  # the controller starts the watcher before any agent has stopped
+    f = start()
+    assert f.quiet()
+    assert f.proc.poll() is None
+    inbox.mkdir()
+    (inbox / "alpha-100").write_text("first stop\n")
+    assert f.read(3) == "== alpha-100\nfirst stop\n\n"
+    assert f.eventually((inbox / "read" / "alpha-100").exists)
+    assert f.stop() == 0
+
+
 def test_follow_ignores_dotfile_temp_until_renamed(follow):
     inbox, start = follow
     f = start()
