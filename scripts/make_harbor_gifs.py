@@ -38,7 +38,7 @@ MARGIN = 10
 CAPTION_ROWS = 2  # the scenario's title, then what is happening (or what you would hear)
 TITLE_STYLE = "bold bright_white"  # the panel's own styles: the captain's hat, and his "Fire!"
 SOUND_STYLE = "bold red"
-SOUND = "♪ "  # a caption that starts with this is a sound
+SOUND = "♪ "  # a caption that starts with this is a sound; a ring pulses beside the title while it shows
 MEDIA = ROOT / "media"
 
 
@@ -62,24 +62,31 @@ def _span(f: int, start: int, end: int | None = None) -> str:
     return "done" if end is not None and f >= end else "running"
 
 
+def _caption(f: int, timeline: list[tuple[int, str]]) -> str:
+    """The caption showing at frame f: the last one in (start frame, text) order that has started."""
+    return [text for start, text in timeline if f >= start][-1]
+
+
 def busy_morning(f: int):
-    subs = [("scout", "haiku 4.5", 8, 42, 10_000), ("builder", "sonnet 5.5", 16, 58, 80_000), ("reviewer", "opus 5.5", 24, 74, 80_000)]
+    # The first to finish is the biggest, so in the moored pile (newest on top, two columns apart) each of
+    # the three stays visible; two sloops side by side would merge into one block of sail.
+    subs = [("builder", "sonnet 5.5", 30, 75, 80_000), ("scout", "haiku 4.5", 40, 95, 10_000),
+            ("reviewer", "opus 5.5", 50, 115, 10_000)]
     agents = [agent("main", model="opus 5.5", burn=400_000)]
     agents += [agent(n, "main", model=m, burn=b, status=_span(f, s, e), finished_at=e / FPS)
                for n, m, s, e, b in subs if f >= s]
-    if f < 8:
-        caption = "Morning. The captain's ship sails out: the main session is working."
-    elif f < 30:
-        caption = "Subagents put out one by one, each sail colored by its model."
-    elif f < 74:
-        caption = "As each one finishes it moors at the pier, the newest on top."
-    else:
-        caption = "All three moored. The captain sails on."
-    return agents, caption, 0
+    return agents, _caption(f, [
+        (0, "Morning. The captain's ship sails out: the main session is working."),
+        (30, "Subagents put out one by one, each sail colored by its model."),
+        (75, "As each one finishes it moors at the pier, the newest on top."),
+        (120, "The finished boats stack in a pile at the pier. The captain sails on."),
+    ]), 0
 
 
-SHIPS = [("def-127-grading", "sonnet 5.5", 120_000), ("def-128-binding", "opus 5.5", 400_000),
-         ("feat-255-wizard", "sonnet 5.5", 10_000), ("def-131-export", "haiku 4.5", 60_000)]
+# No galleons in lane 1: a galleon never bobs, and a boat a row out of step with its neighbor puts its wake
+# right against the neighbor's label (the agent ids here all bob in the same phase).
+SHIPS = [("def-127-grading", "sonnet 5.5", 120_000), ("def-128-binding", "opus 5.5", 200_000),
+         ("feat-255-wizard", "haiku 4.5", 10_000)]
 
 
 def crowded_harbor(f: int):
@@ -88,53 +95,44 @@ def crowded_harbor(f: int):
               agent("docs", "main", model="haiku 4.5", status="done", finished_at=0.0)]
     for name, model, burn in SHIPS:
         agents.append(agent(f"{name}/main", model=model, burn=burn, ship=name))
-    agents.append(agent("def-127-grading/sub", "def-127-grading/main", model="haiku 4.5", ship="def-127-grading"))
-    if f < 30:
-        caption = "Four worktree agents share the harbor, each labeled with its ticket id."
-    elif f < 60:
-        caption = "The main session's own ship reads Captain; its subagents read crew."
-    else:
-        caption = "A worktree's subagents sail under its label too, e.g. def-127 above."
-    return agents, caption, 0
+    return agents, _caption(f, [
+        (0, "Three worktree agents share the harbor, each labeled with its ticket id."),
+        (35, "The main session's ship reads Captain; its own subagents read crew."),
+        (70, "A crew boat that has finished is moored at the pier, still labeled crew."),
+    ]), 0
 
 
-FIRES = {20: 1, 50: 2}  # frame -> advisor calls landing in that poll
+FIRES = {30: 1, 95: 2}  # frame -> advisor calls landing in that poll
 
 
 def advisor_call(f: int):
     agents = [agent("main", model="opus 5.5", burn=400_000), agent("builder", "main", model="sonnet 5.5", burn=80_000)]
-    since = [f - at for at in FIRES if f >= at]
-    if not since:
-        caption = "The main session is working, with a subagent in tow."
-    elif min(since) < 18:
-        caption = SOUND + ("BOOM! An advisor call: the captain fires the cannon." if f < 50
-                           else "BOOM! Two advisor calls in one poll: two shots, one boom.")
-    else:
-        caption = "The captain sails on until the next advisor call."
-    return agents, caption, FIRES.get(f, 0)
+    return agents, _caption(f, [
+        (0, "The main session is working, with a subagent in tow."),
+        (30, SOUND + "BOOM! An advisor call: the captain fires the cannon, and the shot splashes down."),
+        (65, "The captain sails on until the next advisor call."),
+        (95, SOUND + "BOOM! Two advisor calls in one poll: two shots, one boom."),
+    ]), FIRES.get(f, 0)
 
 
 def attention_call(f: int):
-    turn_over = f >= 40
-    agents = [agent("main", model="opus 5.5", burn=400_000, status="idle" if turn_over else "running"),
-              agent("builder", "main", model="sonnet 5.5", burn=80_000, status=_span(f, 0, 25), finished_at=2.5)]
-    if f < 25:
-        caption = "The main session works with one subagent."
-    elif f < 40:
-        caption = "The subagent finishes and moors at the pier."
-    elif f < 55:
-        caption = "The turn ends: the ship drops anchor and the captain dozes (zzz)."
-    else:
-        caption = SOUND + 'A few quiet seconds on: BOOM (a deep cannon), or "Ahoy, matey!". Your turn.'
-    return agents, caption, 0
+    agents = [agent("main", model="opus 5.5", burn=400_000, status="idle" if f >= 65 else "running"),
+              agent("builder", "main", model="sonnet 5.5", burn=80_000, status=_span(f, 0, 35), finished_at=3.5)]
+    return agents, _caption(f, [
+        (0, "The main session works with one subagent."),
+        (35, "The subagent finishes and moors at the pier."),
+        (65, "The turn ends: the ship stops and the captain dozes (zzz)."),
+        (100, SOUND + 'A few quiet seconds later the panel calls you: BOOM (a deep cannon) or "Ahoy, matey!"'),
+        (135, SOUND + "GIFs have no sound, so this caption stands in for the call. Your turn."),
+    ]), 0
 
 
 # name -> (title, frames, script)
 SCENARIOS = {
-    "busy-morning": ("Busy morning", 95, busy_morning),
-    "crowded-harbor": ("Crowded harbor", 90, crowded_harbor),
-    "advisor-call": ("Advisor call", 80, advisor_call),
-    "attention-call": ("Your turn", 90, attention_call),
+    "busy-morning": ("Busy morning", 160, busy_morning),
+    "crowded-harbor": ("Crowded harbor", 105, crowded_harbor),
+    "advisor-call": ("Advisor call", 135, advisor_call),
+    "attention-call": ("Your turn", 165, attention_call),
 }
 
 
@@ -191,7 +189,7 @@ def _fonts():
     return face
 
 
-def draw(grid, title: str, caption: str, fonts):
+def draw(grid, title: str, caption: str, fonts, frame: int = 0):
     from PIL import Image, ImageDraw
 
     size = (COLS * CELL_W + 2 * MARGIN, (ROWS + 1 + CAPTION_ROWS) * CELL_H + 2 * MARGIN)
@@ -206,8 +204,14 @@ def draw(grid, title: str, caption: str, fonts):
     for y, row in enumerate(grid):
         for x, (ch, style) in enumerate(row):
             put(x, y, ch, style)
+    ring = ""
+    if caption.startswith(SOUND):  # the sound made visible: rings that widen and shrink back
+        n = 1 + (frame // 2) % 3
+        ring = "  " + "(" * n + " " + SOUND.strip() + " " + ")" * n
     for x, ch in enumerate(title):
         put(x, ROWS + 1, ch, TITLE_STYLE)
+    for x, ch in enumerate(ring):
+        put(len(title) + x, ROWS + 1, ch, SOUND_STYLE)
     for x, ch in enumerate(caption):
         put(x, ROWS + 2, ch, SOUND_STYLE if caption.startswith(SOUND) else "")
     return img
@@ -221,7 +225,7 @@ def render(name: str, out_dir: Path, fonts) -> list[Path]:
     title = SCENARIOS[name][0]
     with tempfile.TemporaryDirectory() as tmp:
         for i, (grid, caption) in enumerate(frames(name)):
-            draw(grid, title, caption, fonts).save(Path(tmp) / f"{i:04d}.png")
+            draw(grid, title, caption, fonts, i).save(Path(tmp) / f"{i:04d}.png")
         src = ["-framerate", str(FPS), "-i", str(Path(tmp) / "%04d.png")]
         exact = ["-fflags", "+bitexact", "-flags:v", "+bitexact", "-map_metadata", "-1"]
         gif, mp4 = out_dir / f"{name}.gif", out_dir / f"{name}.mp4"

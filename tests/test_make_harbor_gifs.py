@@ -1,5 +1,6 @@
 """scripts/make_harbor_gifs.py: the palette mapping and the four scenarios' frames. No Pillow or ffmpeg needed."""
 import importlib.util
+import itertools
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ from rich.color import Color
 from rich.terminal_theme import SVG_EXPORT_THEME
 
 from agent_panel.boats import SAIL
-from agent_panel.harbor import dock_size, dock_x, docked, hull_row
+from agent_panel.harbor import LABEL_STYLE, WAKE, dock_size, dock_x, docked, hull_row
 
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "make_harbor_gifs.py"
 _spec = importlib.util.spec_from_file_location("make_harbor_gifs", _PATH)
@@ -49,6 +50,28 @@ def test_busy_morning_ends_with_the_subagents_moored():
     pile = range(dock_x(gifs.COLS), gifs.COLS - dock_size(gifs.COLS)[1])  # the moored cards, left of the pier
     drawn = [cells[y][x][0] for y in range(hull_row(gifs.ROWS, 0, False) + 1) for x in pile]
     assert SAIL in drawn and "\\" in drawn
+
+
+def test_busy_morning_pile_shows_each_moored_boat():
+    cells, _ = gifs.frames("busy-morning")[-1]
+    pile = range(dock_x(gifs.COLS), gifs.COLS - dock_size(gifs.COLS)[1])
+    sails = {cells[y][x][1] for y in range(hull_row(gifs.ROWS, 0, False) + 1) for x in pile if cells[y][x][0] == SAIL}
+    assert len(sails) == 3  # one sail color per model: none of the three is hidden under the others
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_every_caption_shows_long_enough_to_read(name):
+    shown = [caption for _, caption in gifs.frames(name)]
+    runs = [len(list(g)) for _, g in itertools.groupby(shown)]
+    assert min(runs) >= 2.5 * gifs.FPS
+
+
+def test_crowded_harbor_labels_never_touch_a_wake():
+    for cells, _ in gifs.frames("crowded-harbor"):
+        for row in cells[:-1]:  # not the water
+            for (a, sa), (b, sb) in zip(row, row[1:]):
+                wake_a, wake_b = a in WAKE and sa != LABEL_STYLE, b in WAKE and sb != LABEL_STYLE
+                assert not (sa == LABEL_STYLE and wake_b or wake_a and sb == LABEL_STYLE), "".join(c for c, _ in row)
 
 
 def test_crowded_harbor_shows_ticket_labels_captain_and_crew():

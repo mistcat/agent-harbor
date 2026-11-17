@@ -13,18 +13,18 @@ each one moors at the pier when it finishes.
 
 ![Busy morning: subagents sail out and moor at the pier](media/busy-morning.gif)
 
-**Crowded harbor:** several worktree agents, each labeled with its ticket id; the main session's ship reads
+**Crowded harbor:** three worktree agents, each labeled with its ticket id; the main session's ship reads
 Captain and its own subagents read crew.
 
-![Crowded harbor: worktree ships labeled def-127, def-128, feat-255 and def-131](media/crowded-harbor.gif)
+![Crowded harbor: worktree ships labeled def-127, def-128 and feat-255, the Captain's ship and its crew](media/crowded-harbor.gif)
 
 **Advisor call:** the captain fires the cannon.
 
 ![Advisor call: the captain fires the cannon](media/advisor-call.gif)
 
-**Your turn:** the main session's turn ends, the ship drops anchor, and the attention call sounds.
+**Your turn:** the main session's turn ends, the ship stops and the captain dozes, and the attention call sounds.
 
-![Your turn: the ship drops anchor and the attention call sounds](media/attention-call.gif)
+![Your turn: the ship stops, the captain dozes and the attention call sounds](media/attention-call.gif)
 
 MP4 versions: [busy morning](media/busy-morning.mp4), [crowded harbor](media/crowded-harbor.mp4),
 [advisor call](media/advisor-call.mp4), [your turn](media/attention-call.mp4). They are made by
