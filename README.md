@@ -174,7 +174,7 @@ agent-session new <name> [--branch B] [--prompt TEXT | --prompt-file FILE]
 agent-session done <name> [--force]
 agent-session ls
 agent-session peek <name> [lines]
-agent-session inbox [--wait] [--timeout SECONDS]
+agent-session inbox [--wait [--timeout SECONDS] | --follow [--interval SECONDS]]
 agent-session controller
 agent-session panel [name]
 ```
@@ -216,7 +216,12 @@ wiring, and a project copy that is only a symlink to the installed hook. Both wi
 one of the two wirings.
 
 Reports land in `${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox` (override with
-`AGENT_SESSION_INBOX`); `agent-session inbox` prints and archives them.
+`AGENT_SESSION_INBOX`); `agent-session inbox` prints and archives them, oldest first, moving each to
+`inbox/read/`. To watch them arrive, run `agent-session inbox --follow` once, in the background, for the
+whole session: it prints each report as it lands (checking every `--interval` seconds, default 2), prints
+nothing while the inbox is empty, and runs until SIGINT or SIGTERM. `agent-session inbox --wait` is the
+one-shot form: it blocks until there is a report, prints that batch and exits (exit 2 after `--timeout`
+seconds, default 3600). `--follow` and `--wait` can't be combined.
 
 The controller runs on Sonnet with a Fable advisor. Override with `AGENT_SESSION_CONTROLLER_MODEL` and
 `AGENT_SESSION_ADVISOR_MODEL`, or set `CONTROLLER_MODEL` / `ADVISOR_MODEL` in the project config. Its standing
