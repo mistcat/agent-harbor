@@ -8,8 +8,8 @@ not a package dependency: .venv/bin/pip install pillow).
 Each scenario is a made-up fleet of `Agent`s, played frame by frame through the panel's own `layout`,
 `step` and `render_harbor` (and the cannon's `fire`/`advance`), at COLS x ROWS cells. Cells are drawn in
 Menlo on a dark background, with the colors Rich itself gives the panel's styles under its SVG export theme
-(SVG_EXPORT_THEME; `dim` blended toward the background as Rich's export does). Videos have no sound, so a
-caption strip under the harbor says what you would hear. Nothing is random, so a re-run writes the same files.
+(SVG_EXPORT_THEME; `dim` blended toward the background as Rich's export does). These GIFs and MP4s have no
+sound, so a caption strip under the harbor says what you would hear. Nothing is random, so a re-run writes the same files.
 
 --mobile writes 4:5 portrait MP4s for phone feeds instead, with sound: the harbor at MOBILE_COLS columns in
 big cells, its empty sky cropped, a clear band at the top for a headline, large captions below, and the
@@ -84,6 +84,9 @@ GAIN_DB = {WAV.name: 1.0, ATTENTION_WAV.name: 1.7, AHOY_WAV.name: -3.0}
 BED_DB = -6.0  # the excerpt measures -21.8 LUFS; this puts the bed near -28 LUFS
 DUCK_DB = -12.0
 PRE_DUCK_S, POST_DUCK_S = 1.5, 1.0  # the bed is calm this long before a cue, and stays down this long after it
+# name -> {cue frame: second}: a duck held longer, to that second. The attention call's boom is followed by
+# the bed's biggest swell, so the bed stays down from the boom until the ahoy's own duck takes over.
+DUCK_HOLD = {"attention-call": {140: 19.5}}
 FADE_S = 1.0
 
 
@@ -137,17 +140,20 @@ SHIPS = [("def-127-grading", "sonnet 5.5", 120_000), ("def-128-binding", "opus 5
          ("feat-255-wizard", "haiku 4.5", 10_000)]
 
 
+CROWDED_CAPTIONS = [
+    (0, "Three worktree agents share the harbor, each labeled with its ticket id."),
+    (55, "The main session's ship reads Captain; its own subagents read crew."),
+    (110, "A crew boat that has finished is moored at the pier, still labeled crew."),
+]
+
+
 def crowded_harbor(f: int, ships=SHIPS, tests: str = "running"):
     agents = [agent("main", model="opus 5.5", burn=400_000),
               agent("tests", "main", model="sonnet 5.5", burn=60_000, status=tests, finished_at=0.0),
               agent("docs", "main", model="haiku 4.5", status="done", finished_at=0.0)]
     for name, model, burn in ships:
         agents.append(agent(f"{name}/main", model=model, burn=burn, ship=name))
-    return agents, _caption(f, [
-        (0, "Three worktree agents share the harbor, each labeled with its ticket id."),
-        (55, "The main session's ship reads Captain; its own subagents read crew."),
-        (110, "A crew boat that has finished is moored at the pier, still labeled crew."),
-    ]), 0
+    return agents, _caption(f, CROWDED_CAPTIONS), 0
 
 
 FIRES = {45: 1, 160: 2}  # frame -> advisor calls landing in that poll
@@ -199,10 +205,11 @@ MOBILE_SCRIPTS = {
 
 # The mobile clips have sound, so their captions say what you hear. Scenarios not named keep their captions.
 MOBILE_CAPTIONS = {
-    "busy-morning": BUSY_CAPTIONS[:2] + [(100, "As each one finishes, the finished boats stack up at the pier.")]
+    "busy-morning": BUSY_CAPTIONS[:2] + [(100, "As each one finishes, it moors in line at the pier.")]
     + BUSY_CAPTIONS[3:],
+    "crowded-harbor": CROWDED_CAPTIONS[:2] + [(110, "Finished crew boats are moored at the pier, still labeled crew.")],
     "attention-call": ATTENTION_CAPTIONS[:3] + [
-        (140, SOUND + "A few quiet seconds later the panel calls you. A deep boom: your turn."),
+        (140, SOUND + "A few seconds later the panel calls you. A deep boom: your turn."),
         (210, SOUND + 'Or, if you pick it, a gravelly "Ah-hoy, may-tee!"'),
     ],
 }
@@ -276,7 +283,9 @@ def ringing(name: str, f: int) -> bool:
 
 def duck_windows(name: str) -> list[tuple[float, float]]:
     """(start, end) seconds the bed is ducked around each cue: calm before it, and while its tail rings out."""
-    return [(f / FPS - PRE_DUCK_S, f / FPS + wav_seconds(wav) + POST_DUCK_S) for f, wav in sound_cues(name)]
+    hold = DUCK_HOLD.get(name, {})
+    return [(f / FPS - PRE_DUCK_S, max(f / FPS + wav_seconds(wav) + POST_DUCK_S, hold.get(f, 0)))
+            for f, wav in sound_cues(name)]
 
 
 def wrap_caption(caption: str) -> list[str]:

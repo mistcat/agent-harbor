@@ -182,7 +182,22 @@ def test_mobile_crowded_harbor_boats_keep_water_between_them():
 def test_mobile_busy_morning_caption_says_what_the_pile_shows():
     captions = _mobile_captions("busy-morning")
     assert not any("newest on top" in c for c in captions)
-    assert any("stack up at the pier" in c for c in captions)
+    assert any("in line at the pier" in c for c in captions)
+
+
+def test_mobile_crowded_harbor_caption_speaks_of_every_moored_crew_boat():
+    captions = _mobile_captions("crowded-harbor")
+    assert not any("A crew boat" in c for c in captions)
+    assert any("crew boats" in c and "moored" in c for c in captions)
+
+
+def test_mobile_attention_call_never_promises_quiet_over_the_waves():
+    assert not any("quiet" in c for c in _mobile_captions("attention-call"))
+
+
+def test_attention_call_bed_stays_down_from_the_boom_until_the_ahoy():
+    (_, boom_end), (ahoy_start, _) = gifs.duck_windows("attention-call")
+    assert boom_end == pytest.approx(ahoy_start) == pytest.approx(19.5)
 
 
 @pytest.mark.parametrize("name", list(gifs.SCENARIOS))
@@ -203,7 +218,8 @@ def test_bed_ducks_from_before_each_cue_until_after_it(name):
     assert len(windows) == len(cues)
     for (start, end), (f, wav) in zip(windows, cues):
         assert start == pytest.approx(f / gifs.FPS - gifs.PRE_DUCK_S)
-        assert end == pytest.approx(f / gifs.FPS + gifs.wav_seconds(wav) + gifs.POST_DUCK_S)
+        default = f / gifs.FPS + gifs.wav_seconds(wav) + gifs.POST_DUCK_S
+        assert end == pytest.approx(max(default, gifs.DUCK_HOLD.get(name, {}).get(f, 0)))
         assert gifs.PRE_DUCK_S >= 1.5 and gifs.POST_DUCK_S >= 1.0
 
 
