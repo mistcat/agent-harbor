@@ -28,7 +28,7 @@ Captain and its own subagents read crew.
 
 MP4 versions: [busy morning](media/busy-morning.mp4), [crowded harbor](media/crowded-harbor.mp4),
 [advisor call](media/advisor-call.mp4), [your turn](media/attention-call.mp4). They are made by
-`scripts/make_harbor_gifs.py` (needs Pillow and ffmpeg).
+`scripts/make_harbor_gifs.py` (needs Pillow, ffmpeg and macOS system fonts).
 
 ## Requirements
 

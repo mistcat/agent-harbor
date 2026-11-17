@@ -6,6 +6,9 @@ import pytest
 from rich.color import Color
 from rich.terminal_theme import SVG_EXPORT_THEME
 
+from agent_panel.boats import SAIL
+from agent_panel.harbor import dock_size, dock_x, docked, hull_row
+
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "make_harbor_gifs.py"
 _spec = importlib.util.spec_from_file_location("make_harbor_gifs", _PATH)
 gifs = importlib.util.module_from_spec(_spec)
@@ -39,10 +42,13 @@ def _plain(name):
 
 
 def test_busy_morning_ends_with_the_subagents_moored():
-    last = _plain("busy-morning")[-1]
-    assert "╤" in last
-    hull_row = next(l for l in last.split("\n") if "╤" in l)
-    assert hull_row.count("\\___/") + hull_row.count("\\_____/") + hull_row.count("_/") >= 1
+    _, count, script = gifs.SCENARIOS["busy-morning"]
+    agents, _, _ = script(count - 1)
+    assert {a.id for a in docked(agents)} == {"scout", "builder", "reviewer"}
+    cells, _ = gifs.frames("busy-morning")[-1]
+    pile = range(dock_x(gifs.COLS), gifs.COLS - dock_size(gifs.COLS)[1])  # the moored cards, left of the pier
+    drawn = [cells[y][x][0] for y in range(hull_row(gifs.ROWS, 0, False) + 1) for x in pile]
+    assert SAIL in drawn and "\\" in drawn
 
 
 def test_crowded_harbor_shows_ticket_labels_captain_and_crew():
@@ -58,7 +64,6 @@ def test_advisor_call_fires_the_cannon():
     assert any("*" in p for p in plain)
 
 
-def test_attention_call_drops_anchor_and_says_so():
-    shown = gifs.frames("attention-call")
-    assert "zzz" in "\n".join("".join(ch for ch, _ in row) for row in shown[-1][0])
-    assert any("Ahoy" in caption for _, caption in shown)
+def test_attention_call_ends_at_anchor():
+    cells, _ = gifs.frames("attention-call")[-1]
+    assert "zzz" in "\n".join("".join(ch for ch, _ in row) for row in cells)

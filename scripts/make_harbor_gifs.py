@@ -2,7 +2,8 @@
 
 Run from the repo root: .venv/bin/python scripts/make_harbor_gifs.py [OUT_DIR]   (default: media/)
 
-Needs Pillow (in your venv only, it is not a package dependency: .venv/bin/pip install pillow) and ffmpeg.
+Needs macOS (for the Menlo and Apple Symbols system fonts), ffmpeg, and Pillow (in your venv only, it is
+not a package dependency: .venv/bin/pip install pillow).
 Each scenario is a made-up fleet of `Agent`s, played frame by frame through the panel's own `layout`,
 `step` and `render_harbor` (and the cannon's `fire`/`advance`), at COLS x ROWS cells. Cells are drawn in
 Menlo on a dark background, with the colors Rich itself gives the panel's styles under its SVG export theme
@@ -233,6 +234,9 @@ def render(name: str, out_dir: Path, fonts) -> list[Path]:
 def main() -> None:
     if shutil.which("ffmpeg") is None:
         sys.exit("make_harbor_gifs.py needs ffmpeg on PATH (brew install ffmpeg)")
+    missing = [path for path in (FONT, FALLBACK) if not Path(path).is_file()]
+    if missing:
+        sys.exit(f"make_harbor_gifs.py runs on macOS only: it draws with the system fonts, and these are missing: {', '.join(missing)}")
     fonts = _fonts()
     out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else MEDIA
     out_dir.mkdir(parents=True, exist_ok=True)
