@@ -1,6 +1,8 @@
 """scripts/make_harbor_gifs.py: the palette mapping and the four scenarios' frames. No Pillow or ffmpeg needed."""
 import importlib.util
 import itertools
+import math
+import re
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,7 @@ from rich.color import Color
 from rich.terminal_theme import SVG_EXPORT_THEME
 
 from agent_panel.boats import SAIL
-from agent_panel.harbor import LABEL_STYLE, WAKE, dock_size, dock_x, docked, hull_row
+from agent_panel.harbor import LABEL_MIN_W, LABEL_STYLE, WAKE, dock_size, dock_x, docked, hull_row
 
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "make_harbor_gifs.py"
 _spec = importlib.util.spec_from_file_location("make_harbor_gifs", _PATH)
@@ -117,7 +119,7 @@ def _mobile_plain(name):
 
 @pytest.mark.parametrize("name", list(gifs.SCENARIOS))
 def test_mobile_crop_only_drops_empty_sky(name):
-    for cells, _ in gifs.frames(name, gifs.MOBILE_COLS):
+    for cells, _ in gifs.frames(name, gifs.MOBILE_COLS, script=gifs.MOBILE_SCRIPTS.get(name)):
         assert all(ch == " " for row in cells[:gifs.MOBILE_CROP] for ch, _ in row)
     for cells, _ in gifs.mobile_frames(name):
         assert len(cells) == gifs.ROWS - gifs.MOBILE_CROP and all(len(row) == gifs.MOBILE_COLS for row in cells)
@@ -138,11 +140,71 @@ def test_mobile_crowded_harbor_shows_every_label():
     assert "more" not in text
 
 
-def test_mobile_busy_morning_pile_shows_each_moored_boat():
-    cells, _ = gifs.frames("busy-morning", gifs.MOBILE_COLS)[-1]
+def _mobile_pile(cells):
+    """The moored cards' cells in a cropped mobile frame: (sail styles, hull row text)."""
     pile = range(dock_x(gifs.MOBILE_COLS), gifs.MOBILE_COLS - dock_size(gifs.MOBILE_COLS)[1])
-    sails = {cells[y][x][1] for y in range(hull_row(gifs.ROWS, 0, False) + 1) for x in pile if cells[y][x][0] == SAIL}
-    assert len(sails) == 3
+    hull = hull_row(gifs.ROWS, 0, False) - gifs.MOBILE_CROP
+    sails = {cells[y][x][1] for y in range(hull + 1) for x in pile if cells[y][x][0] == SAIL}
+    return sails, "".join(cells[hull][x][0] for x in pile).strip()
+
+
+def test_mobile_busy_morning_pile_shows_each_moored_boat_with_its_own_hull():
+    """The pile fans its cards two columns apart, so a third card would show only two columns of its hull."""
+    cells, _ = gifs.mobile_frames("busy-morning")[-1]
+    sails, hulls = _mobile_pile(cells)
+    cards = ["\\" + h for h in hulls.split("\\")[1:]]
+    assert len(sails) == len(cards) == len(gifs.MOBILE_BUSY_SUBS) >= 2
+    assert all(len(card.rstrip("/")) >= 4 for card in cards), hulls
+
+
+def test_mobile_harbor_is_as_narrow_as_labels_allow():
+    assert gifs.MOBILE_COLS == LABEL_MIN_W
+
+
+def test_mobile_labels_are_drawn_bright():
+    assert gifs.mobile_style(LABEL_STYLE) == gifs.MOBILE_LABEL_STYLE
+    assert gifs.style_rgb(gifs.MOBILE_LABEL_STYLE)[1]  # bold
+    assert gifs.mobile_style("dodger_blue3") == "dodger_blue3"
+
+
+def _longest_nose_to_tail(frames):
+    """The most frames in a row with a hull's end, its wake, then the next hull and no blank cell between."""
+    touching = [any(re.search(r"/[~\-.]*\\", "".join(ch for ch, _ in row)) for row in cells) for cells, _ in frames]
+    return max((len(list(run)) for hit, run in itertools.groupby(touching) if hit), default=0)
+
+
+def test_mobile_crowded_harbor_boats_keep_water_between_them():
+    """Boats touch only for a moment, as two pass at a turn; the wide fleet at this width sails nose to tail."""
+    assert _longest_nose_to_tail(gifs.mobile_frames("crowded-harbor")) <= 0.8 * gifs.FPS
+    assert _longest_nose_to_tail(gifs.frames("crowded-harbor", gifs.MOBILE_COLS)) == gifs.SCENARIOS["crowded-harbor"][1]
+
+
+def test_mobile_busy_morning_caption_says_what_the_pile_shows():
+    captions = _mobile_captions("busy-morning")
+    assert not any("newest on top" in c for c in captions)
+    assert any("stack up at the pier" in c for c in captions)
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_ring_pulses_only_while_a_sound_plays(name):
+    count = gifs.SCENARIOS[name][1]
+    want = set()
+    for f, wav in gifs.sound_cues(name):
+        want |= set(range(f, f + math.ceil((gifs.wav_seconds(wav) + gifs.RING_TAIL_S) * gifs.FPS)))
+    assert {f for f in range(count) if gifs.ringing(name, f)} == want
+    captions = _mobile_captions(name)
+    assert all(captions[f].startswith(gifs.SOUND) for f in want)
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_bed_ducks_from_before_each_cue_until_after_it(name):
+    windows = gifs.duck_windows(name)
+    cues = gifs.sound_cues(name)
+    assert len(windows) == len(cues)
+    for (start, end), (f, wav) in zip(windows, cues):
+        assert start == pytest.approx(f / gifs.FPS - gifs.PRE_DUCK_S)
+        assert end == pytest.approx(f / gifs.FPS + gifs.wav_seconds(wav) + gifs.POST_DUCK_S)
+        assert gifs.PRE_DUCK_S >= 1.5 and gifs.POST_DUCK_S >= 1.0
 
 
 def test_mobile_advisor_call_fires_the_cannon():
@@ -217,3 +279,12 @@ def test_mix_without_cues_is_the_bed_alone():
 def test_missing_bed_exits_with_a_clear_message(tmp_path):
     with pytest.raises(SystemExit, match="background track"):
         gifs.check_bed(tmp_path / "nope.ogg")
+
+
+@pytest.mark.parametrize("name", list(gifs.SCENARIOS))
+def test_each_clip_plays_a_stretch_of_the_bed_that_it_holds(name):
+    assert 0 <= gifs.bed_offset(name) and gifs.bed_offset(name) + gifs.SCENARIOS[name][1] / gifs.FPS <= gifs.BED_S
+
+
+def test_advisor_call_starts_the_bed_where_its_cannons_land_between_swells():
+    assert gifs.bed_offset("advisor-call") == 5.0 and gifs.bed_offset("busy-morning") == 0.0
