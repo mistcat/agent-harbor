@@ -10,6 +10,7 @@ Nothing queued. See Later.
 
 From the final review on 2026-11-13, not yet fixed:
 
+- Three or more finished boats in the pier's pile: `_draw_dock` fans the cards two columns apart, so each middle card's hull is covered by the next card (a pile of three reads as two hulls with three masts; the mobile busy-morning clip shows two moored boats because of it). Found 2026-11-16 while making the phone clips.
 - Two subagents that each claim the other as parent disappear instead of showing under main.
 - `--session` with a missing file shows the generic "waiting" text.
 - A tier upgrade near the right edge re-slots the boat to x=0.
