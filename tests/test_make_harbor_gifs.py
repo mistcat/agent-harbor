@@ -149,12 +149,12 @@ def _mobile_pile(cells):
 
 
 def test_mobile_busy_morning_pile_shows_each_moored_boat_with_its_own_hull():
-    """The pile fans its cards two columns apart, so a third card would show only two columns of its hull."""
+    """Each card under another shows a closed little hull, \\_/, and the top card its whole hull."""
     cells, _ = gifs.mobile_frames("busy-morning")[-1]
     sails, hulls = _mobile_pile(cells)
     cards = ["\\" + h for h in hulls.split("\\")[1:]]
     assert len(sails) == len(cards) == len(gifs.MOBILE_BUSY_SUBS) >= 2
-    assert all(len(card.rstrip("/")) >= 4 for card in cards), hulls
+    assert all(card.endswith("/") for card in cards) and len(cards[-1]) >= 5, hulls
 
 
 def test_mobile_harbor_is_as_narrow_as_labels_allow():
@@ -169,7 +169,11 @@ def test_mobile_labels_are_drawn_bright():
 
 def _longest_nose_to_tail(frames):
     """The most frames in a row with a hull's end, its wake, then the next hull and no blank cell between."""
-    touching = [any(re.search(r"/[~\-.]*\\", "".join(ch for ch, _ in row)) for row in cells) for cells, _ in frames]
+    def water(row):  # the pier's row without its pile, whose cards lie hull to hull on purpose
+        text = "".join(ch for ch, _ in row)
+        return text[:dock_x(len(text))] if "╤" in text else text
+
+    touching = [any(re.search(r"/[~\-.]*\\", water(row)) for row in cells) for cells, _ in frames]
     return max((len(list(run)) for hit, run in itertools.groupby(touching) if hit), default=0)
 
 

@@ -115,7 +115,7 @@ def _caption(f: int, timeline: list[tuple[int, str]]) -> str:
     return [text for start, text in timeline if f >= start][-1]
 
 
-# The first to finish is the biggest, so in the moored pile (newest on top, two columns apart) each of
+# The first to finish is the biggest, so in the moored pile (newest on top, three columns apart) each of
 # the three stays visible; two sloops side by side would merge into one block of sail.
 BUSY_SUBS = [("builder", "sonnet 5.5", 50, 100, 80_000), ("scout", "haiku 4.5", 60, 120, 10_000),
              ("reviewer", "opus 5.5", 70, 140, 10_000)]
@@ -192,8 +192,8 @@ SCENARIOS = {
     "attention-call": ("Your turn", 270, attention_call),
 }
 
-# Mobile fleets. The pile fans its cards two columns apart, so a middle card shows only two columns of hull:
-# two moored boats, not three, so each keeps a hull of its own. A boat lane is sailed in 10-column slots,
+# Mobile fleets. Two moored boats, not three: at this width the pile is three cards, and the clip was made
+# when a middle card showed no hull of its own (the pile now closes each one, \_/). A boat lane is sailed in 10-column slots,
 # so sloops (7 wide, and a 3-cell wake) sail nose to tail: the worktree ships are rowboats and the crew boat
 # is moored, which leaves water between the boats.
 MOBILE_BUSY_SUBS = [BUSY_SUBS[0], BUSY_SUBS[2]]

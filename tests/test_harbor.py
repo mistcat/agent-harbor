@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent_panel.app import AgentPanelApp
 from agent_panel.boats import SPRITES, TIER_GALLEON, TIER_SLOOP, tier
-from agent_panel.harbor import Boat, layout, render_harbor, step
+from agent_panel.harbor import Boat, footprint, layout, render_harbor, step
 from agent_panel.session import Watcher
 from tests.helpers import agent_call
 from tests.test_session import add_sub, make_session
@@ -224,9 +224,9 @@ def sail(ags, boats, seconds, width=80, dt=0.1):
 def test_children_sail_behind_parent():
     ags = fleet()
     for direction in (1, -1):
-        boats, _ = layout(ags, 100, 20, {})
+        boats, _ = layout(ags, 110, 20, {})
         boats["main"].x, boats["main"].direction = 40.0, direction
-        sail(ags, boats, 4.0, width=100)  # 24 cells either way: clear of the edge and the dock
+        sail(ags, boats, 4.0, width=110)  # 24 cells either way: clear of the edge and the dock
         p, c = boats["main"], boats["a1"]
         assert abs(p.lane - c.lane) <= 1
         trail = (p.x - c.x) * direction  # positive = child is on the side opposite the parent's heading
@@ -236,9 +236,9 @@ def test_children_sail_behind_parent():
 
 def test_second_child_trails_further_behind():
     ags = fleet() + [ag("a2", "main", 1, "kid2", burn=1)]
-    boats, _ = layout(ags, 120, 20, {})
+    boats, _ = layout(ags, 130, 20, {})
     boats["main"].x, boats["main"].direction = 60.0, 1
-    sail(ags, boats, 4.0, width=120)
+    sail(ags, boats, 4.0, width=130)  # 24 cells to the right: clear of the dock
     kids = sorted((boats["a1"].x, boats["a2"].x), reverse=True)  # ranked by position, not by name
     assert boats["main"].x > kids[0] > kids[1] and kids[0] - kids[1] >= SLOT_W - 1
 
@@ -830,3 +830,27 @@ def test_no_labels_without_a_lane_so_the_dock_stays_on_the_water(height):
     assert not labelled(ags, 100, height)
     lines = render_harbor(ags, {}, 100, height, 0).plain.split("\n")
     assert "\\_" in lines[-2][dock_x(100):]  # the pile's hull sits right on the water row
+
+
+@pytest.mark.parametrize("width", [100, 50])
+@pytest.mark.parametrize("burns", [[10], [60_000], [400_000], [10, 400_000, 60_000, 400_000, 10], [400_000, 10]])
+def test_every_card_in_the_pile_shows_its_own_hull(width, burns):
+    cards, _ = dock_size(width)
+    ags = [ag("main", None, 0, "main", status="idle")] + \
+          [ag(f"d{i}", "main", 1, status="done", burn=burns[i % len(burns)], finished_at=float(i)) for i in range(cards)]
+    hull = render_harbor(ags, {}, width, 17, 0).plain.split("\n")[-2][dock_x(width):].split("╤")[0].strip()
+    # A whole little hull per card, side by side, never one long one or a jumble.
+    assert hull == "\\_/" * (cards - 1) + SPRITES[tier(burns[(cards - 1) % len(burns)])][-1].strip()
+
+
+def test_a_tier_upgrade_at_the_right_edge_keeps_the_boat_there():
+    ags = agents(2, burn=10)
+    boats, _ = layout(ags, 100, 17, {})
+    sub = boats["a1"]
+    room = 100 - footprint(False, "rowboat")
+    sub.x = float(room)  # parked against the right edge as a rowboat
+    grown = [ags[0], ag("a1", "main", 1, "t1", burn=TIER_GALLEON)]
+    after, _ = layout(grown, 100, 17, boats)
+    assert after["a1"].tier == "galleon"
+    assert after["a1"].lane == sub.lane
+    assert after["a1"].x == 100 - footprint(False, "galleon")  # nudged left just enough, not re-slotted to x=0

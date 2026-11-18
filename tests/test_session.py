@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from agent_panel.session import Watcher, config_dir, pick_session, project_dir
+from agent_panel.session import Watcher, pick_session, slug_dir
 from tests.helpers import advisor_call, agent_call, assistant, write_jsonl
 
 U = {"input_tokens": 5, "output_tokens": 5}
@@ -31,23 +31,11 @@ def by_id(snap):
     return {a.id: a for a in snap.agents}
 
 
-def test_project_dir_slug(tmp_path):
+def test_slug_dir(tmp_path):
     # Real rule seen in ~/.claude*/projects: every non-alphanumeric char becomes "-"
     # (/Users/nate/Code/claude_tools/x -> -Users-nate-Code-claude-tools-x; "/.worktrees" -> "--worktrees").
     slug = tmp_path / "projects" / "-Users-nate-Code-claude-tools-my-app"
-    slug.mkdir(parents=True)
-    assert project_dir(Path("/Users/nate/Code/claude_tools/my.app"), tmp_path) == slug
-
-
-def test_no_project_dir_returns_none(tmp_path):
-    assert project_dir(Path("/nowhere/at/all"), tmp_path) is None
-
-
-def test_config_dir_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
-    assert config_dir() == tmp_path
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
-    assert config_dir() == Path.home() / ".claude"
+    assert slug_dir(Path("/Users/nate/Code/claude_tools/my.app"), tmp_path) == slug
 
 
 def test_subagent_linked_to_main_by_tool_use_id(tmp_path):
@@ -279,3 +267,30 @@ def test_snapshot_reports_the_main_turn_ended(tmp_path):
     assert Watcher(tmp_path).poll().turn_ended is True
     make_session(tmp_path)  # its one message has no stop_reason: still mid-turn
     assert Watcher(tmp_path).poll().turn_ended is False
+
+
+def test_two_subagents_that_claim_each_other_show_under_main(tmp_path):
+    make_session(tmp_path)
+    add_sub(tmp_path, "sess1", "a1", "toolu_b", blocks=[agent_call("toolu_a", "spawn b")])
+    add_sub(tmp_path, "sess1", "b1", "toolu_a", blocks=[agent_call("toolu_b", "spawn a")])
+    add_sub(tmp_path, "sess1", "c1", "toolu_c")
+    write_jsonl(tmp_path / "sess1" / "subagents" / "agent-b1.jsonl",
+                [assistant("s-b1", SONNET, U, blocks=[agent_call("toolu_b", "spawn a"), agent_call("toolu_c", "spawn c")])])
+    a = by_id(Watcher(tmp_path).poll())
+    assert {"a1", "b1", "c1"} <= set(a)
+    # One of the pair goes back under main, unlinked; the other and c1 keep the parent they claim.
+    top = [k for k in ("a1", "b1") if a[k].parent_id == "main"]
+    assert len(top) == 1 and not a[top[0]].linked
+    other = "b1" if top == ["a1"] else "a1"
+    assert a[other].parent_id == top[0] and a[other].depth == 2
+    assert a["c1"].parent_id == "b1"
+
+
+def test_a_transcript_replaced_by_a_larger_file_is_read_from_the_start(tmp_path):
+    p = make_session(tmp_path)
+    w = Watcher(tmp_path)
+    assert w.poll().agents[0].burn == 10
+    new = tmp_path / "new.tmp"
+    write_jsonl(new, [assistant(f"z{i}", OPUS, {"output_tokens": 1}) for i in range(40)])
+    os.replace(new, p)  # a new file in its place, larger than the offset already read
+    assert w.poll().agents[0].burn == 40
