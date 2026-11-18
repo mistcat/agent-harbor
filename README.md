@@ -32,6 +32,9 @@ Captain and its own subagents read crew.
 
 ![Your turn: the ship stops, the captain dozes and the attention call sounds](media/attention-call.gif)
 
+The clips were made with v0.3. Since v0.4 each boat in the pier pile shows its own small hull (`\_/`), which the
+clips don't show yet.
+
 ## Requirements
 
 Developed and tested on macOS. I haven't tested other platforms.
