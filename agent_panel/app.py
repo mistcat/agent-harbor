@@ -30,8 +30,9 @@ class AgentPanelApp(App):
     """
 
     def __init__(self, watcher: Watcher | Fleet | None, waiting_dir: Path, boomer: Boomer | None = None, captain: bool = True,
-                 keep_done: float = KEEP_DONE_S, attention: Boomer | None = None):
+                 keep_done: float = KEEP_DONE_S, attention: Boomer | None = None, pinned: str | None = None):
         super().__init__()
+        self.pinned = pinned
         self.attention = Attention()
         self.attention_player = attention if attention is not None else Boomer(False)
         self.keep_done = keep_done
@@ -102,15 +103,17 @@ class AgentPanelApp(App):
         header = self.query_one("#header", Static)
         tree = self.query_one("#tree", Static)
         if snap is None:
-            header.update(f"agent-panel · {self.waiting_dir.name}")
-            self._show(tree, Text(f" waiting for a Claude session in {self.waiting_dir}", style="dim"))
+            self._show(header, Text(f"agent-panel · {self.waiting_dir.name}"))
+            wait = (f" no session {self.pinned} for {self.waiting_dir} (check --session and --config-dir)" if self.pinned
+                    else f" waiting for a Claude session in {self.waiting_dir}")
+            self._show(tree, Text(wait, style="dim"))
             self.query_one("#harbor", Static).display = False
             return
         agents, retired = retire(snap.agents, time.time(), self.keep_done)
         ships = len({a.ship for a in agents})
         fleet = f" · {ships} ships" if ships > 1 else ""
         done = f" · {retired} done" if retired else ""
-        header.update(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}{done}")
+        self._show(header, Text(f"agent-panel · {snap.session_id[:8]} · {self.waiting_dir.name}{fleet}{done}"))
         width = tree.size.width or self.size.width
         rendered = render_tree(agents, width, self.frame, snap.advisor_model)
         self._show(tree, rendered)

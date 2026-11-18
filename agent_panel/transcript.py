@@ -17,13 +17,17 @@ class Tail:
         self.offset = 0
         self._buf = b""
         self.was_reset = False
+        self._ino: tuple[int, int] | None = None
 
     def poll(self) -> list[dict]:
         self.was_reset = False
         try:
-            size = self.path.stat().st_size
-            if size < self.offset:
+            st = self.path.stat()
+            ino = (st.st_dev, st.st_ino)
+            # Shorter, or another file in its place (even a larger one): read it again from the start.
+            if st.st_size < self.offset or self._ino is not None and ino != self._ino:
                 self.offset, self._buf, self.was_reset = 0, b"", True
+            self._ino = ino
             with open(self.path, "rb") as f:
                 f.seek(self.offset)
                 data = f.read()

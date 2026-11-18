@@ -32,6 +32,9 @@ Captain and its own subagents read crew.
 
 ![Your turn: the ship stops, the captain dozes and the attention call sounds](media/attention-call.gif)
 
+The clips were made with v0.3. Since v0.4 each boat in the pier pile shows its own small hull (`\_/`), which the
+clips don't show yet.
+
 ## Requirements
 
 Developed and tested on macOS. I haven't tested other platforms.
@@ -151,7 +154,7 @@ Rex split panes do not inherit `CLAUDE_CONFIG_DIR`. When it is unset, agent-pane
 | `--no-captain` | no pirate captain on the main ship |
 | `--keep-done SECONDS` | how long a finished subagent stays on screen (default 180) |
 
-Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches. `--session` and `--config-dir` apply to the flagship; each other ship follows its worktree's newest session, in the config dir found the same way (the flag, then `CLAUDE_CONFIG_DIR`, then the newest of `~/.claude*`).
+Without `--session` it follows the newest session in the project and only switches away from one that has been quiet for 60 seconds. A pinned session never switches; while its transcript doesn't exist the panel says so and names the session, instead of waiting. `--session` and `--config-dir` apply to the flagship; each other ship follows its worktree's newest session, in the config dir found the same way (the flag, then `CLAUDE_CONFIG_DIR`, then the newest of `~/.claude*`).
 
 ## Reading the display
 
@@ -165,7 +168,7 @@ its place instead; a child that shares its leader's lane, as in the top lane, sa
 flagship's own, so nothing sails over the captain or into the cannon's arc; other boats use it only when the
 harbor has a single lane. When space runs out the label is cut first (`…`), then the effort, then the burn bar; model and burn always stay. The harbor hides when it would get fewer than 8 rows. More sailing boats than fit show as `+N more` (top right); the flagship is placed first, then every running agent and its leaders, then the rest in tree order. That order holds on every frame: a boat keeps its place from the last frame only while no higher-priority boat needs the water.
 
-Finished subagents (ones not leading a running one) stop sailing and moor at a pier at the right end of the bottom lane, fanned like a deck of cards with the most recently finished on top. The pile shows 5 boats at 80 columns and up, 3 from 40 columns, and the rest as `+N` over the pier. Below 40 columns there is no pier, only `+N docked` at the top left (shortened to `+N`, or left out, when `+N more` needs the row). So there are three counts: `+N more` for sailing boats with no room, `+N` at the pier for finished boats under the pile, and `· N done` in the header for retired ones.
+Finished subagents (ones not leading a running one) stop sailing and moor at a pier at the right end of the bottom lane, fanned like a deck of cards with the most recently finished on top: each boat under another shows a small closed hull, `\_/`, and the top one its whole hull. The pile shows 5 boats at 80 columns and up, 3 from 40 columns, and the rest as `+N` over the pier. Below 40 columns there is no pier, only `+N docked` at the top left (shortened to `+N`, or left out, when `+N more` needs the row). So there are three counts: `+N more` for sailing boats with no room, `+N` at the pier for finished boats under the pile, and `· N done` in the header for retired ones.
 
 With more than one ship on screen, every boat carries a dim label under its hull naming the ship it belongs to, so subagent boats can be told apart across ships: `Captain` for the flagship itself and `crew` for its subagents. Every other ship, and its subagents, carries the ticket id its worktree name starts with, `def-<digits>` or `feat-<digits>` in any case (`def-127-grading` becomes `def-127`, `feat-255-wizard` becomes `feat-255`), or else the name up to its first `-` (`harbor-ahoy` becomes `harbor`), cut to 8 characters with `…`. Two ships never share a label, ignoring case: ones that still would (the same worktree name in two repos, or `def-127-a` beside `def-127-b`) are numbered instead, `harbor-1` and `harbor-2` (a ticket id keeps all its digits, `def-127-1`, even past 8 characters), and only the flagship's own fleet reads `Captain` or `crew` (a worktree named `crew-x` gets a numbered label). A label counts as part of its boat, so labels never touch another boat or label, and the pile is named once under it when its ships' names fit. Labels are the first thing to go: none below 50 columns, and none when their extra row per lane would cost the harbor one of its first two lanes. With a single ship nothing changes.
 
@@ -173,7 +176,7 @@ A finished subagent leaves both the tree and the harbor 180 seconds after its la
 
 Model colors: **opus** purple, **sonnet** orange, **haiku** blue, everything else (fable, unknown) green. Yellow is reserved for the captain's skull. The main ship's sail carries a white Jolly Roger (crossed bones, plus a skull on the bigger sails).
 
-Boat size follows token burn (input + cache creation + output, counted once per message):
+Boat size follows token burn (input + cache creation + output, counted once per message). Cache reads are collected but not shown or counted in the burn:
 
 | Burn | Boat |
 | --- | --- |
@@ -181,7 +184,9 @@ Boat size follows token burn (input + cache creation + output, counted once per 
 | 50k to 300k | sloop |
 | 300k and up | galleon |
 
-Row marks: `✓` done, a spinner for running, `·` idle. A `?` after a label means the subagent could not be matched to a parent call and is shown under main.
+Row marks: `✓` done, a spinner for running, `·` idle. A `?` after a label means the subagent could not be matched to a parent call and is shown under main; so is one of two subagents whose transcripts each name the other as parent.
+
+Quit with ctrl+q.
 
 ## Tests
 

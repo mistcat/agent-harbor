@@ -15,19 +15,9 @@ MAIN_RUNNING_S = 10  # main "running" = transcript modified this recently
 SUBAGENT_STALE_S = 30  # a subagent whose meta lacks `finished` is done once its file is this quiet
 
 
-def config_dir() -> Path:
-    env = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(env) if env else Path.home() / ".claude"
-
-
 def slug_dir(cwd: Path, cfg: Path) -> Path:
     # Every non-alphanumeric char becomes "-" (checked against real project dirs).
     return cfg / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
-
-
-def project_dir(cwd: Path, cfg: Path) -> Path | None:
-    p = slug_dir(cwd, cfg)
-    return p if p.is_dir() else None
 
 
 def _epoch(ts: str | None) -> float | None:
@@ -81,6 +71,29 @@ def pick_session(proj: Path, current: Path | None, now: float, quiet_s: float = 
     if newest != current and now - _mtime(current) >= quiet_s and _mtime(newest) > _mtime(current):
         return newest
     return current
+
+
+def _break_cycles(kids: dict[str, list], ids: list[str], key) -> None:
+    """Subagents whose parents claim each other in a loop never hang from main, so the tree would drop them.
+    Move one agent of each loop under main, unlinked; the rest of the loop and its children hang from it."""
+    parent = {aid: pid for pid, ks in kids.items() for _, aid, _ in ks}
+    while True:
+        seen, todo = set(), ["main"]
+        while todo:
+            for _, aid, _ in kids.get(todo.pop(), []):
+                if aid not in seen:
+                    seen.add(aid)
+                    todo.append(aid)
+        lost = [aid for aid in ids if aid not in seen]
+        if not lost:
+            return
+        cur, path = lost[0], []
+        while cur not in path:  # walk up from a lost agent until the walk repeats: that agent is in the loop
+            path.append(cur)
+            cur = parent[cur]
+        kids[parent[cur]] = [k for k in kids[parent[cur]] if k[1] != cur]
+        kids["main"].append((key(cur), cur, False))
+        parent[cur] = "main"
 
 
 @dataclass
@@ -164,6 +177,7 @@ class Watcher:
             if not linked:
                 parent, idx = "main", 10**9
             kids.setdefault(parent, []).append(((idx, _mtime(files[aid]), aid), aid, linked))
+        _break_cycles(kids, ids, lambda aid: (10**9, _mtime(files[aid]), aid))
 
         def add(pid: str, depth: int):
             for _, aid, linked in sorted(kids.get(pid, [])):

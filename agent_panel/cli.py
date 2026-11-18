@@ -35,5 +35,5 @@ def main(argv: list[str] | None = None) -> int:
     # git worktrees each add a ship with its own flotilla.
     watcher = Fleet(cwd, args.config_dir, pinned=args.session, also_repos=[p.resolve() for p in args.also_repo])
     AgentPanelApp(watcher, cwd, Boomer(not args.no_sound), captain=not args.no_captain, keep_done=args.keep_done,
-                 attention=attention_player(args.attention_sound, not args.no_sound)).run()
+                 attention=attention_player(args.attention_sound, not args.no_sound), pinned=args.session).run()
     return 0

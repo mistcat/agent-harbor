@@ -13,7 +13,7 @@ SPEED = 6.0  # cells per second for a running boat
 WAKE = "~-."  # nearest to farthest behind the hull
 LANE_H = 7  # tallest sprite plus a row of clear water above it
 SLOT_W = 10  # widest sprite plus a gap
-PILE_STEP = 2  # docked boats fan out like a deck of cards, this many columns apart
+PILE_STEP = 3  # docked boats fan out like a deck of cards, this many columns apart: a covered card shows \_/
 PILE_W = 7  # the widest subagent sprite: the first card of the pile
 LABEL_MAX = 8  # a ship label under a boat, ellipsis included
 LABEL_MIN_W = 50  # narrower harbors drop the labels first
@@ -241,8 +241,10 @@ def layout(agents: list[Agent], width: int, height: int, prev: dict[str, Boat]) 
         t = tier(a.burn)
         label = boat_label(a, names)
         w = footprint(a.flagship, t, label)
-        if old and old.lane in allowed(a) and 0 <= old.x <= lane_width(old.lane, width) - w:
-            return Boat(a.id, old.x, old.lane, old.direction, t, a.flagship, label, lab)
+        if old and old.lane in allowed(a) and 0 <= old.x and lane_width(old.lane, width) - w >= 0:
+            # A boat that grew (a tier upgrade, a longer label) at the right end moves left just enough.
+            x = min(old.x, float(lane_width(old.lane, width) - w))
+            return Boat(a.id, x, old.lane, old.direction, t, a.flagship, label, lab)
         return None
 
     # Tier by tier, each tier keeps its old positions and then places its newcomers before the next tier
@@ -372,10 +374,14 @@ def _draw_dock(grid, moored: list[Agent], room: int, lab: bool = False, names: d
             for y in range(hull_y + 1, height):
                 grid[y][x] = ("║", "tan")
     shown = moored[len(moored) - min(len(moored), cards):]
+    # The newest card ends at the pier; the others step left from its bow, whatever their size.
+    top_x = px - 1 - sprite_width(tier(shown[-1].burn)) if shown else px
     for i, a in enumerate(shown):  # oldest first, so the newest lies on top
         sprite = SPRITES[tier(a.burn)]
-        x = px - 1 - sprite_width(tier(a.burn)) - PILE_STEP * (len(shown) - 1 - i)
+        x = top_x - PILE_STEP * (len(shown) - 1 - i)
         top = hull_y - len(sprite) + 1
+        if i < len(shown) - 1:  # the next card covers all but this one's bow: close its hull there
+            sprite = sprite[:-1] + [sprite[-1][:PILE_STEP - 1] + "/" + sprite[-1][PILE_STEP:]]
         for dy, line in enumerate(sprite):
             for dx, ch in enumerate(line):
                 if ch != " " and top + dy >= 0 and x0 <= x + dx < px:

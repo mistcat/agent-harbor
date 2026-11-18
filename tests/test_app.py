@@ -91,3 +91,31 @@ def test_app_survives_odd_shaped_entries(tmp_path):
             # Main keeps its burn; the subagent with garbage meta stays listed, falling back to its id.
             assert "main" in text and "a1" in text
     run(go())
+
+
+def test_app_says_a_pinned_session_was_not_found(tmp_path):
+    make_session(tmp_path, "other")
+
+    async def go():
+        app = AgentPanelApp(Watcher(tmp_path, pinned="nope1234"), Path("/proj/demo"), pinned="nope1234")
+        async with app.run_test(size=(80, 20)) as pilot:
+            await pilot.pause(0.6)
+            text = str(app.query_one("#tree").content)
+            assert "nope1234" in text and "waiting for a Claude session" not in text
+    run(go())
+
+
+def test_app_header_updates_only_when_it_changes(tmp_path):
+    make_session(tmp_path, "abcdef123456")
+
+    async def go():
+        app = AgentPanelApp(Watcher(tmp_path), Path("/proj/demo"))
+        async with app.run_test(size=(60, 20)) as pilot:
+            await pilot.pause(0.6)
+            header = app.query_one("#header")
+            calls = []
+            orig = header.update
+            header.update = lambda *a, **k: (calls.append(a), orig(*a, **k))
+            await pilot.pause(1.2)
+            assert calls == []
+    run(go())
