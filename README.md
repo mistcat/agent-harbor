@@ -202,7 +202,7 @@ agent-session new <name> [--branch B] [--prompt TEXT | --prompt-file FILE]
 agent-session done <name> [--force]
 agent-session ls
 agent-session peek <name> [lines]
-agent-session inbox [--wait [--timeout SECONDS] | --follow [--interval SECONDS]]
+agent-session inbox [--wait [--timeout SECONDS] | --follow [--interval SECONDS] | --peek | --count]
 agent-session controller
 agent-session panel [name]
 ```
@@ -211,6 +211,8 @@ agent-session panel [name]
 checkout. Turn it off with `AGENT_SESSION_PANEL=0` or `PANEL=0` in `.agent-session/config`; if `agent-panel`
 isn't on PATH it is skipped with a note, and a panel problem never fails the command. `agent-session panel`
 opens one by hand beside the controller, or beside agent session `<name>`.
+`controller` records its Rex session's ID beside the inbox (`controller-rex-id`), so `controller` and `panel`
+still find the controller after something renames its session; they fall back to the `<prefix>controller` label.
 
 Agents report back through a Claude Code Stop hook. `agent-stop-hook` does nothing unless `agent-session`
 started the Claude, so wire it once in your user-level Claude settings:
@@ -249,7 +251,17 @@ Reports land in `${XDG_STATE_HOME:-~/.local/state}/agent-session/<prefix>/inbox`
 whole session: it prints each report as it lands (checking every `--interval` seconds, default 2), prints
 nothing while the inbox is empty, and runs until SIGINT or SIGTERM. `agent-session inbox --wait` is the
 one-shot form: it blocks until there is a report, prints that batch and exits (exit 2 after `--timeout`
-seconds, default 3600). `--follow` and `--wait` can't be combined.
+seconds, default 3600). `--follow` and `--wait` can't be combined. `agent-session inbox --peek` prints the
+unread reports without archiving them and `--count` prints how many there are; use these for anything that
+only checks the inbox, so it never eats a report meant for the controller.
+
+The controller is told to run its one `inbox --follow` under Claude Code's Monitor tool, which wakes it on
+each report. A plain background command wakes Claude only when it exits, and `--follow` never exits. A
+monitor expires after 30 minutes at most, so the controller starts it again each time it expires.
+
+A report holds the agent's last message, from the hook input or, failing that, the last assistant text in
+its transcript (so a stop that ends on a tool call repeats the last thing the agent said). A stop with no
+message at all writes no report.
 
 Read the output with something that keeps reading until the command ends, such as a terminal or
 Claude Code's Monitor tool, not `| head`. A report counts as read once it is written to the output: if the

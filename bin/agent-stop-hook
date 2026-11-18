@@ -3,7 +3,8 @@
 #
 # Does nothing unless agent-session started this Claude, which sets AGENT_SESSION_NAME and
 # AGENT_SESSION_INBOX. Then writes one file <inbox>/<name>-<epoch> with the agent's name,
-# the time and the first lines of its last message, for `agent-session inbox` to read.
+# the time and the first lines of its last message (from the hook input, else the transcript;
+# no message, no file), for `agent-session inbox` to read.
 # Fires on every turn end, so a report means "look at this agent", not necessarily "it
 # finished". Because it no-ops everywhere else, it can be wired once in user-level settings.
 #
@@ -39,6 +40,20 @@ if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && wired_elsewhere 2>/dev/null; then exit 
 {
   input="$(cat)"
   message="$(jq -r '.last_assistant_message // empty' <<<"$input" | head -n 20)"
+  # The hook input can lack the message (it did for whole sessions); fall back to the last
+  # assistant text in the transcript (a stop that ended on a tool call repeats it). With neither
+  # there is nothing to report: a file holding only the name and time would wake the controller
+  # for nothing.
+  if [[ -z "${message//[[:space:]]/}" ]]; then
+    transcript="$(jq -r '.transcript_path // empty' <<<"$input")"
+    if [[ -f "$transcript" ]]; then
+      # -R + fromjson?: a half-written last line must not lose the whole transcript.
+      message="$(jq -rRn '[inputs | fromjson? | select(.type? == "assistant" and .isSidechain != true) | .message.content
+                          | if type == "array" then map(select(.type == "text") | .text) | join("\n") else . end
+                          | strings | select(test("\\S"))] | last // empty' "$transcript" | head -n 20)"
+    fi
+  fi
+  [[ -n "${message//[[:space:]]/}" ]] || exit 0
   mkdir -p "$AGENT_SESSION_INBOX" || exit 0
   file="$AGENT_SESSION_INBOX/$AGENT_SESSION_NAME-$(date +%s)"
   if [[ -e "$file" ]]; then file="$file.$$"; fi
@@ -46,7 +61,7 @@ if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && wired_elsewhere 2>/dev/null; then exit 
   {
     echo "agent: $AGENT_SESSION_NAME"
     echo "time:  $(date '+%Y-%m-%d %H:%M:%S %Z')"
-    if [[ -n "$message" ]]; then printf '\n%s\n' "$message"; fi
+    printf '\n%s\n' "$message"
   } >"$tmp" && mv "$tmp" "$file"
 } 2>/dev/null
 

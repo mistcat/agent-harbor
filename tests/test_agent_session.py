@@ -1061,3 +1061,115 @@ def test_follow_whose_reader_exits_leaves_the_report_unread(world, box):
     assert "agent-session: output closed; left a-100 in the inbox\n" in p.stderr.read()
     assert (box / "a-100").read_text() == "first\n"
     assert not list((box / "read").iterdir()) if (box / "read").exists() else True
+
+
+def test_peek_prints_unread_reports_and_leaves_them(world, box):
+    (box / "b-200").write_text("second\n")
+    (box / "a-100").write_text("first\n")
+    for _ in range(2):
+        r = world.session("inbox", "--peek")
+        assert (r.returncode, r.stdout, r.stderr) == (0, "== a-100\nfirst\n\n== b-200\nsecond\n\n", "")
+    assert sorted(p.name for p in box.iterdir()) == ["a-100", "b-200"]
+    assert "first" in world.session("inbox").stdout
+    r = world.session("inbox", "--peek")
+    assert (r.returncode, r.stdout) == (0, "no new agent reports\n")
+
+
+def test_count_prints_the_number_of_unread_reports(world, box):
+    assert world.session("inbox", "--count").stdout == "0\n"
+    (box / "a-100").write_text("first\n")
+    (box / "b-200").write_text("second\n")
+    (box / ".c-300.tmp").write_text("partial\n")
+    r = world.session("inbox", "--count")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "2\n", "")
+    assert (box / "a-100").exists() and (box / "b-200").exists()
+
+
+def test_count_works_before_the_inbox_exists(world):
+    world.env["AGENT_SESSION_INBOX"] = str(world.tmp / "nowhere")
+    assert world.session("inbox", "--count").stdout == "0\n"
+    assert not (world.tmp / "nowhere").exists()
+
+
+@pytest.mark.parametrize("other", [["--wait"], ["--follow"], ["--count"], ["--timeout", "5"], ["--interval", "1"]])
+def test_peek_and_count_stand_alone(world, other):
+    for flag_ in ("--peek", "--count"):
+        if other == [flag_]:
+            continue
+        r = world.session("inbox", flag_, *other)
+        assert r.returncode != 0, (flag_, other)
+        assert flag_ in r.stderr
+
+
+def transcript(path, *entries):
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    return str(path)
+
+
+def said(text):
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def test_hook_skips_a_report_with_no_message(world, tmp_path):
+    inbox = tmp_path / "hookbox"
+    for payload in ({}, {"last_assistant_message": ""}, {"last_assistant_message": "  \n"}):
+        r = hook(world.env, json.dumps(payload), AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
+        assert r.returncode == 0
+    assert not inbox.exists() or not list(inbox.iterdir())
+
+
+def test_hook_falls_back_to_the_transcripts_last_text(world, tmp_path):
+    inbox = tmp_path / "hookbox"
+    tool_use = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
+    t = transcript(tmp_path / "t.jsonl", said("early words"), {"type": "user", "message": {"content": "go"}},
+                   said("Report: tests green, branch ready."), tool_use)
+    r = hook(world.env, json.dumps({"transcript_path": t}), AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
+    assert r.returncode == 0
+    (report,) = list(inbox.iterdir())
+    text = report.read_text()
+    assert "Report: tests green, branch ready." in text and "early words" not in text
+
+
+def test_hook_skips_when_the_transcript_has_no_text_either(world, tmp_path):
+    inbox = tmp_path / "hookbox"
+    for t in (transcript(tmp_path / "t.jsonl", {"type": "user", "message": {"content": "go"}}),
+              str(tmp_path / "missing.jsonl")):
+        hook(world.env, json.dumps({"transcript_path": t}), AGENT_SESSION_NAME="a", AGENT_SESSION_INBOX=str(inbox))
+    assert not inbox.exists() or not list(inbox.iterdir())
+
+
+def controller_id_file(world):
+    return world.state / "agent-session" / "proj" / "controller-rex-id"
+
+
+def test_controller_records_its_rex_session_id(world):
+    assert world.session("controller").returncode == 0
+    assert controller_id_file(world).read_text().strip() == "sess-1"
+
+
+def test_a_renamed_controller_is_found_by_its_recorded_id(world):
+    world.session("controller")
+    world.env["FAKE_SESSIONS"] = json.dumps({"sessions": [{"session_id": "sess-1", "label": "something-else"}]})
+    r = world.session("panel")
+    assert r.returncode == 0, r.stderr
+    assert flag(split_call(world), "-s") == "sess-1"
+    before = len([c for c in world.calls() if c[0] == "new"])
+    r = world.session("controller")
+    assert r.returncode == 0 and "already open" in r.stdout
+    assert len([c for c in world.calls() if c[0] == "new"]) == before
+
+
+def test_a_stale_recorded_id_falls_back_to_the_label(world):
+    controller_id_file(world).parent.mkdir(parents=True)
+    controller_id_file(world).write_text("gone\n")
+    world.env["FAKE_SESSIONS"] = sessions("proj-controller")
+    r = world.session("panel")
+    assert r.returncode == 0, r.stderr
+    assert flag(split_call(world), "-s") == "sid-proj-controller"
+
+
+def test_controller_is_told_to_watch_the_inbox_with_monitor(world):
+    world.session("controller")
+    prompt = agent_args(world.rex_call("new"))[-1]
+    assert "Monitor" in prompt and "agent-session inbox --follow" in prompt
+    assert "--peek" in prompt
