@@ -1,11 +1,14 @@
 # Roadmap
 
-Nothing queued here; follow-ups for campaignmonitor-rails under Later.
+Nothing queued. See Later.
 
 ## Later
 
-- campaignmonitor-rails runs its own `bin/agent-session` and `bin/agent-stop-hook`. The inbox changes (`inbox --peek`/`--count`, the hook's transcript fallback and empty-report skip) and the report lines its `brief_preamble` lacked are in mistcat/campaignmonitor-rails#333, awaiting review. Its controller keeps waking on a re-armed `inbox --wait`, which already works.
-- Move campaignmonitor-rails onto the shared `agent-session`, as crm did, once #333 is merged. Its own script keeps per-agent test databases and ports, `--server`, `--brief`, the PR flow and conversation resume, so the shared one needs those (or project hooks for them) first. Until then every fix has to be made in both scripts.
+- Move campaignmonitor-rails partly onto the shared `agent-session` (its controller's view, 2026-11-17). Keep one script, with per-repo hooks for what is Rails-specific. Not before its release 1.15.9 has deployed: a changed teardown or inbox path mid-release is risk for no gain.
+  1. Bring into the shared script: #331's teardown hardening (one delete guard, TERM only, 3 retries, always prune and delete the branch), which every repo's `done` should have; `--brief`, fixed so its reports don't land untracked in the main checkout (a dirty tree blocks `bin/deploy-staging`); `--model`/`--advisor` on `new` and `controller`; controller resume (`--fresh`, the recorded conversation id, the `controller-claude` pane check, the Stop hook's controller role); agent Rex ids recorded per worktree, so renamed sessions are still found.
+  2. Add per-project `setup` and `teardown` hooks under `.agent-session/` for the per-agent test database and the port (3100 to 3199, plus `--server`). Teardown must read the same port that setup chose.
+  3. Keep what that repo relies on: `<repo>-worktrees/<name>` and the name rule (Claude's scratchpad and project memory follow the path), the `pwd`/branch check in the preamble, rollback when setup fails, the Agent/Tests/Server tabs, `done` deleting a branch only when it is merged into origin/main and never for `--brief`, and the output format of `new` (the controller reads session ids from it). `COPY_FILES` covers `config/master.key`, `.env` and `.secrets/`.
+  4. Switch the repo behind a throwaway-agent test, changing every consumer and doc of the inbox path (`tmp/agent-inbox` there) at once. The controller stays `captains-chair`, found by its recorded id.
 
 ## Known minor issues
 
