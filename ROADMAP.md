@@ -1,10 +1,11 @@
 # Roadmap
 
-Nothing queued here; one follow-up in another repo under Later.
+Nothing queued here; follow-ups for campaignmonitor-rails under Later.
 
 ## Later
 
 - campaignmonitor-rails runs its own `bin/agent-session` and `bin/agent-stop-hook`. The inbox changes (`inbox --peek`/`--count`, the hook's transcript fallback and empty-report skip) and the report lines its `brief_preamble` lacked are in mistcat/campaignmonitor-rails#333, awaiting review. Its controller keeps waking on a re-armed `inbox --wait`, which already works.
+- Move campaignmonitor-rails onto the shared `agent-session`, as crm did, once #333 is merged. Its own script keeps per-agent test databases and ports, `--server`, `--brief`, the PR flow and conversation resume, so the shared one needs those (or project hooks for them) first. Until then every fix has to be made in both scripts.
 
 ## Known minor issues
 
