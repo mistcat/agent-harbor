@@ -6,6 +6,11 @@ Nothing queued. See Later.
 
 - Switch the crm repo from its own copy of `bin/agent-session` to the shared one here (copy `examples/crm/.agent-session/`).
 
+- Tell the controller when an agent finishes. Found 2026-11-17: harbor showed `feat-086` idle while the controller (a Claude session) heard nothing, because reports only land in `tmp/agent-inbox` and the controller has to poll `agent-session inbox`. Wanted: when an agent's Stop hook writes a report, push one line into the controller's Rex session (for example `rex send` to its pane, or a Monitor-friendly event stream), so the controller wakes without polling.
+  - `agent-session inbox` is destructive: it prints unread reports and moves them to `read/`. A background watcher that polls it (the controller's did, once a minute) eats the reports before the controller reads them. Add a non-consuming `agent-session inbox --peek` (or `--count`) for watchers, and have the push above use it.
+  - Stop-hook reports are often empty. The `agent-session-teardown` agent wrote two reports that held only the agent name and the time. Skip an empty report, or put the agent's last message in it.
+  - A `--brief` agent's report went to a guessed Rex session (`campaignmonitor-rails-e6`) because it did not find the controller by the label `captains-chair`, although that session was running. Find the controller from `tmp/agent-session-controller-rex-id`, as the other commands do.
+
 ## Known minor issues
 
 From the final review on 2026-11-13, not yet fixed:
