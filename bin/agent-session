@@ -5,7 +5,7 @@
 #   agent-session done <name> [--force]
 #   agent-session ls
 #   agent-session peek <name> [lines]
-#   agent-session inbox [--wait [--timeout <seconds>] | --follow [--interval <seconds>]]
+#   agent-session inbox [--wait [--timeout <seconds>] | --follow [--interval <seconds>] | --peek | --count]
 #   agent-session controller [extra prompt...]
 #   agent-session panel [name]
 #
@@ -29,10 +29,13 @@
 # `--wait` blocks until there is one (exit 2 after --timeout seconds, default 3600).
 # `--follow` never exits on its own: it prints each report as it lands (checking every
 # --interval seconds, default 2) until SIGINT/SIGTERM. Run one in the background for the session.
+# `--peek` prints the unread reports without moving them and `--count` prints how many there
+# are, so a watcher can look without eating reports meant for the controller.
 #
 # `peek` prints the last lines of an agent's Agent tab. `controller` opens (or switches to) a
 # Rex session named "<prefix>controller" in the main checkout, running a Claude that
-# coordinates the agents by the practice doc. The controller runs on
+# coordinates the agents by the practice doc. It records that session's ID next to the inbox
+# (controller-rex-id), so `controller` and `panel` still find it after a rename. The controller runs on
 # $AGENT_SESSION_CONTROLLER_MODEL (default sonnet) with the advisor on
 # $AGENT_SESSION_ADVISOR_MODEL (default fable), so its judgment calls get a stronger model.
 #
@@ -133,7 +136,9 @@ load_config() {
   check_model AGENT_SESSION_CONTROLLER_MODEL "$CONTROLLER_MODEL"
   check_model AGENT_SESSION_ADVISOR_MODEL "$ADVISOR_MODEL"
   PANEL="${AGENT_SESSION_PANEL:-$PANEL}"
-  INBOX="${AGENT_SESSION_INBOX:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${PREFIX%-}/inbox}"
+  STATE="${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${PREFIX%-}"
+  INBOX="${AGENT_SESSION_INBOX:-$STATE/inbox}"
+  CONTROLLER_ID_FILE="$STATE/controller-rex-id"
   WORKTREES="$(dirname "$ROOT")/$(basename "$ROOT")-worktrees"
   BASE="$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
   BASE="${BASE#origin/}"
@@ -366,12 +371,27 @@ follow_inbox() { # follow_inbox <interval>: print reports as they land until SIG
   done
 }
 
+peek_inbox() { # print every readable unread report without claiming it
+  local entries f n=0 body
+  entries="$(inbox_entries)"
+  if [[ -n "$entries" ]]; then
+    while IFS= read -r f; do
+      body="$(cat "$f" 2>/dev/null && echo .)" || continue
+      printf '== %s\n%s\n' "$(basename "$f")" "${body%.}"
+      n=$((n + 1))
+    done <<<"$entries"
+  fi
+  if ((n == 0)); then echo "no new agent reports"; fi
+}
+
 cmd_inbox() {
-  local wait=0 follow=0 timeout="" interval="" waited=0
+  local wait=0 follow=0 timeout="" interval="" waited=0 only="" options=0
   while [[ $# -gt 0 ]]; do
+    options=$((options + 1))
     case "$1" in
       --wait) wait=1; shift ;;
       --follow) follow=1; shift ;;
+      --peek|--count) only="${only:-$1}"; shift ;;
       --timeout) [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--timeout needs a number of seconds"; timeout="$2"; shift 2 ;;
       --interval)
         [[ "${2:-}" =~ ^[0-9]*\.?[0-9]+$ && ! "$2" =~ ^[0.]+$ ]] || die "--interval needs a number of seconds above 0"
@@ -379,6 +399,11 @@ cmd_inbox() {
       *) usage ;;
     esac
   done
+  if [[ -n "$only" ]]; then
+    ((options == 1)) || die "$only doesn't go with other inbox options"
+    if [[ "$only" == --count ]]; then inbox_entries | grep -c . || true; else peek_inbox; fi
+    return
+  fi
   [[ "$follow$wait" != 11 ]] || die "--follow and --wait can't be used together: --follow keeps printing reports, --wait prints one batch and exits"
   [[ -z "$interval" || "$follow" == 1 ]] || die "--interval only goes with --follow"
   [[ -z "$timeout" || "$follow" == 0 ]] || die "--timeout doesn't go with --follow, which runs until stopped"
@@ -406,6 +431,18 @@ cmd_inbox() {
   if ((PRINTED == 0)); then echo "no new agent reports"; fi
 }
 
+# The controller's Rex session: the ID `controller` recorded, while that session is open (it
+# survives a rename), else the one labelled <prefix>controller.
+controller_sid() {
+  local id
+  id="$(cat "$CONTROLLER_ID_FILE" 2>/dev/null || true)"
+  if [[ -n "$id" ]] && rex ls --json | jq -e --arg i "$id" 'any(.sessions[]; .session_id == $i)' >/dev/null; then
+    echo "$id"
+  else
+    rex_session_id "$CONTROLLER"
+  fi
+}
+
 controller_prompt() {
   cat <<EOF
 You are the controller for parallel agent sessions on this repo. You run in the main
@@ -417,9 +454,13 @@ checkout ($ROOT) on $BASE. Before anything else:
 3. Report a short board: each session, its branch, what it is doing or waiting on, and any
    overlap between sessions in the files they touch. Then wait for instructions.
 
-Start one \`agent-session inbox --follow\` in the background for the whole session (not one
-per agent, and never a second one); it prints each agent report as it arrives. Peek the
-agent(s) each report names.
+Watch the inbox with the Monitor tool: start one \`agent-session inbox --follow\` under Monitor
+for the whole session (not one per agent, and never a second one). It prints each agent report
+as it arrives, and each report wakes you; a plain background command would only wake you when
+it exits, which --follow never does. A monitor expires (30 minutes at most): give it the longest
+timeout and start it again each time it expires. Peek the agent(s) each report names.
+Anything else that only looks at the inbox uses \`agent-session inbox --peek\` or \`--count\`,
+which leave the reports unread; plain \`inbox\` marks them read.
 
 You don't write feature or fix code here; you start agents for that.
 
@@ -437,7 +478,7 @@ cmd_controller() { # cmd_controller [extra prompt words...], appended after the 
   command -v rex >/dev/null || die "rex not found"
   command -v jq >/dev/null || die "jq not found"
   local existing
-  existing="$(rex_session_id "$CONTROLLER")"
+  existing="$(controller_sid)"
   if [[ -n "$existing" ]]; then
     show_in_app "$existing"
     echo "Controller already open in Rex session $existing; switched to it."
@@ -451,6 +492,8 @@ cmd_controller() { # cmd_controller [extra prompt words...], appended after the 
   out="$(rex new "$CONTROLLER" -c "$ROOT" --window Agent --json -- "${CLAUDE_ENV[@]}" claude --model "$CONTROLLER_MODEL" \
     --settings "{\"advisorModel\":\"$ADVISOR_MODEL\"}" "$(controller_prompt)${extra:+$'\n\n'$extra}")"
   sid="$(jq -er '.session_id' <<<"$out")"
+  mkdir -p "$(dirname "$CONTROLLER_ID_FILE")"
+  echo "$sid" >"$CONTROLLER_ID_FILE"
   rex window new -s "$sid" Shell -c "$ROOT" --focus=false --keep-open --json -- "$SHELL" >/dev/null
   [[ "$PANEL" == 0 ]] || open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$ROOT"
   show_in_app "$sid"
@@ -468,7 +511,7 @@ cmd_panel() {
   command -v rex >/dev/null || die "rex not found"
   command -v jq >/dev/null || die "jq not found"
   command -v agent-panel >/dev/null || die "agent-panel not on PATH"
-  sid="$(rex_session_id "$label")"
+  if [[ -n "$name" ]]; then sid="$(rex_session_id "$label")"; else sid="$(controller_sid)"; fi
   [[ -n "$sid" ]] || die "no Rex session named '$label' is open"
   block="$(rex window ls -s "$sid" --json | jq -r '[.windows[] | select(.label == "Agent") | .layers[].blocks[]?.block_id][0] // empty')"
   [[ -n "$block" ]] || die "no Agent tab in Rex session '$label'"
