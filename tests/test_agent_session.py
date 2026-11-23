@@ -118,7 +118,7 @@ def test_new_branches_from_detected_base_and_copies_files(world):
     wt = world.tmp / "proj-worktrees" / "alpha"
     assert git(wt, "branch", "--show-current") == "agent/alpha"
     assert git(wt, "rev-parse", "HEAD") == git(world.repo, "rev-parse", "origin/trunk")
-    assert (wt / ".env").read_text() == "SECRET=1\n"
+    assert (wt / ".env").read_text() == "SECRET=1\nAGENT_SESSION_REX_ID=sess-1\n"  # copied, then the Rex ID saved
     assert (wt / "worker" / ".dev.vars").read_text() == "X=1\n"
     assert not (wt / "missing.txt").exists()
     assert "missing.txt not found" in r.stderr

@@ -726,7 +726,7 @@ def test_ships_with_the_same_label_are_numbered():
     # A ticket id stays whole and takes the number past LABEL_MAX; other labels keep the cap.
     assert ship_labels(ships("def-127-a", "def-127-b")) == {"": "Captain", "def-127-a": "def-127-1", "def-127-b": "def-127-2"}
     assert ship_labels(ships("feat-255-a", "a:feat-255-a"))["a:feat-255-a"] == "feat-255-2"
-    assert ship_labels(ships("integration-a", "integration-b"))["integration-a"] == "integr-1"
+    assert ship_labels(ships("integration-a", "integration-b"))["integration-a"] == "agent-1"  # too long to show whole
     assert ship_labels(ships("harbor-prune", "harbor-labels")) == {"": "Captain", "harbor-prune": "harbor-1",
                                                                  "harbor-labels": "harbor-2"}
 

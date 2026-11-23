@@ -24,12 +24,13 @@ def git_worktrees(cwd: Path) -> list[Path]:
     return [Path(line[len("worktree "):]).resolve() for line in out.stdout.splitlines() if line.startswith("worktree ")]
 
 
-def _rename(snap: Snapshot, key: str) -> list:
-    """A ship's agents, marked as ship `key`, with ids prefixed by it so they can't collide with the flagship's."""
+def _rename(snap: Snapshot, key: str, path: Path, controller: bool) -> list:
+    """A ship's agents, marked as ship `key`, with ids prefixed by it so they can't collide with the flagship's.
+    Its root also carries the worktree folder name and whether it is the main checkout's (the controller's)."""
     out = []
     for a in snap.agents:
         a = replace(a, id=f"{key}/{a.id}", parent_id=f"{key}/{a.parent_id}" if a.parent_id else None, ship=key)
-        out.append(replace(a, label=key) if a.parent_id is None else a)
+        out.append(replace(a, label=key, worktree=path.name, controller=controller) if a.parent_id is None else a)
     return out
 
 
@@ -58,6 +59,8 @@ class Fleet:
         self.keys: dict[Path, str] = {}  # ship label and id prefix, kept for as long as the worktree is listed
         self._projs: dict[Path, Path] = {}  # each ship's project dir, resolved once per scan
         self._scanned_at: float | None = None
+        self._main: Path | None = None  # the flagship repo's main checkout (git lists it first)
+        self._own: Path | None = None  # the worktree the flagship runs in
 
     def _rescan(self) -> None:
         paths = self._list(self.cwd)
@@ -65,6 +68,7 @@ class Fleet:
         # since a worktree can sit inside the main checkout).
         mine = [self.cwd, *self.cwd.parents]
         own = max((p for p in paths if any(_same(p, c) for c in mine)), key=lambda p: len(p.parts), default=None)
+        self._main, self._own = (paths[0] if paths else None), own
         names = {p: p.name for p in paths if p != own and p.is_dir()}
         for repo in self.also_repos:
             main, *worktrees = self._list(repo) or [None]  # git lists the main checkout first
@@ -93,11 +97,15 @@ class Fleet:
             self._scanned_at = now
             self._rescan()
         agents = list(snap.agents)
+        if self.ships and agents:  # with no other ship nothing is labelled, and the view stays a lone Watcher's
+            own = self._own
+            agents[0] = replace(agents[0], worktree=own.name if own else "",
+                                controller=own is not None and self._main is not None and _same(own, self._main))
         for path, watcher in self.ships.items():
             try:
                 ship = watcher.poll(now)
             except Exception:  # one unreadable ship must not sink the flagship's view
                 continue
             if ship is not None:
-                agents += _rename(ship, self.keys[path])
+                agents += _rename(ship, self.keys[path], path, self._main is not None and _same(path, self._main))
         return replace(snap, agents=agents)

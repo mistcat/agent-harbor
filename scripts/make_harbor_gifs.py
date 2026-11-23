@@ -142,8 +142,8 @@ SHIPS = [("def-127-grading", "sonnet 5.5", 120_000), ("def-128-binding", "opus 5
 
 CROWDED_CAPTIONS = [
     (0, "Three worktree agents share the harbor, each labeled with its ticket id."),
-    (55, "The main session's ship reads Captain; its own subagents read crew."),
-    (110, "A crew boat that has finished is moored at the pier, still labeled crew."),
+    (55, "The main ship reads Captain; each subagent reads its role."),
+    (110, "A crew boat that has finished is moored at the pier, still labeled with its role."),
 ]
 
 
@@ -207,7 +207,7 @@ MOBILE_SCRIPTS = {
 MOBILE_CAPTIONS = {
     "busy-morning": BUSY_CAPTIONS[:2] + [(100, "As each one finishes, it moors in line at the pier.")]
     + BUSY_CAPTIONS[3:],
-    "crowded-harbor": CROWDED_CAPTIONS[:2] + [(110, "Finished crew boats are moored at the pier, still labeled crew.")],
+    "crowded-harbor": CROWDED_CAPTIONS[:2] + [(110, "Finished crew boats are moored at the pier, still labeled with their roles.")],
     "attention-call": ATTENTION_CAPTIONS[:3] + [
         (140, SOUND + "A few seconds later the panel calls you. A deep boom: your turn."),
         (210, SOUND + 'Or, if you pick it, a gravelly "Ah-hoy, may-tee!"'),

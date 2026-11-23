@@ -39,6 +39,12 @@
 # $AGENT_SESSION_CONTROLLER_MODEL (default sonnet) with the advisor on
 # $AGENT_SESSION_ADVISOR_MODEL (default fable), so its judgment calls get a stronger model.
 #
+# Agent sessions are found by Rex session ID too, since Rex and agents rename sessions: `new` saves
+# it as AGENT_SESSION_REX_ID in the worktree's .env (creating it if there was none to copy), or, in
+# a repo that doesn't ignore .env, in the worktree's own git dir (agent-session-rex-id), so the tree
+# stays clean. `done`, `ls`, `peek` and `panel` use the saved ID: a saved session that has closed is
+# closed, whatever now holds its label. Worktrees with no saved ID fall back to the label.
+#
 # `new` and `controller` also open `agent-panel` in a split beside the Agent tab's Claude
 # (35% wide, not focused, following the checkout it was started for). AGENT_SESSION_PANEL=0 or
 # PANEL=0 in the config turns that off; if agent-panel isn't on PATH it is skipped with a note,
@@ -178,6 +184,44 @@ Task:
 EOF
 }
 
+rex_session_open() { # rex_session_open <session-id>
+  rex ls --json | jq -e --arg id "$1" 'any(.sessions[]; .session_id == $id)' >/dev/null
+}
+
+rex_id_file() { # rex_id_file <worktree>: the worktree's own git dir (never shared with other worktrees)
+  local gd
+  gd="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  echo "$gd/agent-session-rex-id"
+}
+
+saved_rex_id() { # saved_rex_id <worktree>: the Rex session ID `new` saved, or nothing
+  local id f
+  id="$(grep -E '^AGENT_SESSION_REX_ID=' "$1/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  if [[ -z "$id" ]] && f="$(rex_id_file "$1")" && [[ -f "$f" ]]; then id="$(head -1 "$f")"; fi
+  echo "$id"
+}
+
+save_rex_id() { # save_rex_id <worktree> <session-id>
+  local f
+  if git -C "$1" check-ignore -q .env; then
+    echo "AGENT_SESSION_REX_ID=$2" >>"$1/.env"
+  elif f="$(rex_id_file "$1")"; then
+    echo "$2" >"$f"
+  else
+    echo "agent-session: warning: couldn't save the Rex session ID; it will be found by its label" >&2
+  fi
+}
+
+agent_sid() { # agent_sid <name>: the agent's open Rex session, by saved ID (else by label), or nothing
+  local id
+  id="$(saved_rex_id "$WORKTREES/$1")"
+  if [[ -z "$id" ]]; then
+    rex_session_id "$PREFIX$1"
+  elif rex_session_open "$id"; then
+    echo "$id"
+  fi
+}
+
 cmd_new() {
   local name="${1:-}"; [[ -n "$name" ]] || usage; shift
   local branch="" prompt=""
@@ -236,6 +280,7 @@ $prompt")"
   fi
   sid="$(jq -er '.session_id' <<<"$out")"
   ROLLBACK_SID="$sid"
+  save_rex_id "$wt" "$sid"
   rex window new -s "$sid" Tests -c "$wt" --focus=false --keep-open --json -- "$SHELL" >/dev/null
   [[ "$PANEL" == 0 ]] || open_panel "$sid" "$(jq -r '.initial_windows[0].block_ids[0] // empty' <<<"$out" 2>/dev/null || true)" "$wt"
 
@@ -268,7 +313,7 @@ $unmerged"
   fi
 
   local sid
-  sid="$(rex_session_id "$PREFIX$name" || true)"
+  sid="$(agent_sid "$name" || true)"
   if [[ -n "$sid" ]]; then
     echo "== Closing Rex session $sid"
     rex kill "$sid" >/dev/null || true
@@ -290,15 +335,15 @@ cmd_ls() {
     [[ -d "$wt" ]] || continue
     name="$(basename "$wt")"
     printf '%-28s %-36s rex %s\n' "$name" "$(git -C "$wt" branch --show-current)" \
-      "$([[ -n "$(rex_session_id "$PREFIX$name")" ]] && echo open || echo closed)"
+      "$([[ -n "$(agent_sid "$name")" ]] && echo open || echo closed)"
   done
 }
 
 cmd_peek() {
   local name="${1:-}" lines="${2:-40}" sid
   [[ -n "$name" ]] || usage
-  sid="$(rex_session_id "$PREFIX$name")"
-  [[ -n "$sid" ]] || die "no Rex session named '$PREFIX$name'"
+  sid="$(agent_sid "$name")"
+  [[ -n "$sid" ]] || die "no open Rex session for '$name' (saved ID or label '$PREFIX$name')"
   rex capture -s "$sid" -w Agent --trim --unwrap | tail -n "$lines"
 }
 
@@ -511,7 +556,7 @@ cmd_panel() {
   command -v rex >/dev/null || die "rex not found"
   command -v jq >/dev/null || die "jq not found"
   command -v agent-panel >/dev/null || die "agent-panel not on PATH"
-  if [[ -n "$name" ]]; then sid="$(rex_session_id "$label")"; else sid="$(controller_sid)"; fi
+  if [[ -n "$name" ]]; then sid="$(agent_sid "$name")"; else sid="$(controller_sid)"; fi
   [[ -n "$sid" ]] || die "no Rex session named '$label' is open"
   block="$(rex window ls -s "$sid" --json | jq -r '[.windows[] | select(.label == "Agent") | .layers[].blocks[]?.block_id][0] // empty')"
   [[ -n "$block" ]] || die "no Agent tab in Rex session '$label'"

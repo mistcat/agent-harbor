@@ -15,10 +15,19 @@ LANE_H = 7  # tallest sprite plus a row of clear water above it
 SLOT_W = 10  # widest sprite plus a gap
 PILE_STEP = 3  # docked boats fan out like a deck of cards, this many columns apart: a covered card shows \_/
 PILE_W = 7  # the widest subagent sprite: the first card of the pile
-LABEL_MAX = 8  # a ship label under a boat, ellipsis included
+LABEL_MAX = 8  # a ship label under a boat (a whole ticket id may run past it)
 LABEL_MIN_W = 50  # narrower harbors drop the labels first
-FLAGSHIP_LABEL = "Captain"
-CREW_LABEL = "crew"  # the flagship's own subagents
+FLAGSHIP_LABEL = "Captain"  # the controller: the main checkout's session, or the flagship when nothing says otherwise
+CREW_LABEL = "crew"  # a subagent whose role can't be told
+SHIP_LABEL = "agent"  # a worktree whose first word is too long to show whole
+# A subagent's role, from the first of these word stems in its description (then in its agent type).
+ROLES = (("review", ("review", "reviewer", "audit", "verify", "check")),
+         ("plan", ("plan", "design", "spec")),
+         ("fix", ("fix", "debug", "repair")),
+         ("test", ("test", "tests", "qa", "run")),
+         ("explore", ("explore", "find", "search", "investigate", "look", "locate", "survey", "research", "read")),
+         ("docs", ("doc", "docs", "document", "readme", "write-up")),
+         ("build", ("build", "implement", "write", "add", "make", "create", "port", "refactor", "wave")))
 TICKET = re.compile(r"(?:def|feat)-\d+(?=-|$)", re.IGNORECASE)  # a worktree name that starts with a ticket id
 LABEL_STYLE = "dim"
 CAPTAIN_COLOR = "yellow"  # the skull; not used by any model family
@@ -120,32 +129,54 @@ def hull_row(height: int, lane: int, labelled: bool) -> int:
     return (height - 2) - lane * lane_h(labelled) - labelled
 
 
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def role(a: Agent) -> str:
+    """A subagent's role for its boat label: "review" for "Opus review of the diff", "explore" for an Explore agent,
+    "crew" when neither its description nor its type tells."""
+    for text in (a.label, a.agent_type):
+        words = _words(text)
+        for name, stems in ROLES:
+            if any(w in stems or any(w == s + end for end in ("s", "er", "ers", "ing", "ed")) for s in stems for w in words):
+                return name
+    return CREW_LABEL
+
+
+def _ship_word(name: str) -> str:
+    """A worktree name's short label: its ticket id, whole, or its first word when that fits, else SHIP_LABEL."""
+    m = TICKET.match(name)
+    if m:
+        return m.group(0)
+    word = name.split("-", 1)[0]
+    return word if 0 < len(word) <= LABEL_MAX else SHIP_LABEL
+
+
 def ship_labels(agents: list[Agent]) -> dict[str, str]:
-    """Each ship's short label: "Captain" for the flagship's; for the others, the ticket id the worktree name
-    (after any "<repo>:") starts with, "def-127" or "feat-255", or else the name up to its first "-", cut to
-    LABEL_MAX with an ellipsis. Labels are unique, ignoring case, and never read "Captain" or "crew": ships
-    that would still share one (the same worktree name in two repos, say) get a numbered label instead, e.g.
-    "harbor-1" and "harbor-2". A numbered ticket id stays whole, "def-127-1", even past LABEL_MAX."""
+    """Each ship's short label. The controller, the session in the repo's main checkout, is "Captain"; so is the
+    flagship, unless it runs in another worktree (then it reads like any ship). Every other ship reads the ticket id
+    its worktree name (after any "<repo>:") starts with, "def-127" or "feat-255", kept whole, or else the name up to
+    its first "-" when that fits LABEL_MAX, or else the fixed "agent": never a word cut short with an ellipsis.
+    Labels are unique, ignoring case, and never read "Captain", "crew" or a role: ships that would still share one
+    (the same worktree name in two repos, say) get a numbered label instead, e.g. "harbor-1" and "harbor-2"."""
+    roots = {a.ship: a for a in agents if a.parent_id is None}
     names = {a.ship: a.ship.rsplit(":", 1)[-1] for a in agents}
-    full = {}
-    for k, name in names.items():
-        if not k:
-            continue
-        m = TICKET.match(name)
-        full[k] = (m.group(0) if m else name.split("-", 1)[0]) or name or k  # never empty: the word, the name, the key
-
-    def cut(label: str) -> str:
-        return label if len(label) <= LABEL_MAX else label[:LABEL_MAX - 1] + "…"
-
-    out = {"": FLAGSHIP_LABEL} if "" in names else {}
-    taken = {FLAGSHIP_LABEL.lower(), CREW_LABEL}
+    # One Captain: the controller ship if there is one, else the flagship unless it is known to be an agent's worktree.
+    captain = next((k for k, r in roots.items() if k and r.controller), None)
+    flag = roots.get("")
+    if captain is None and "" in names and (flag is None or flag.controller or not flag.worktree):
+        captain = ""
+    out = {captain: FLAGSHIP_LABEL} if captain is not None else {}
+    full = {k: _ship_word(roots[k].worktree if not k and k in roots else name) for k, name in names.items() if k != captain}
+    taken = {FLAGSHIP_LABEL.lower(), CREW_LABEL, *(r for r, _ in ROLES)}
     groups: dict[str, list[str]] = {}
     for k, label in full.items():
-        groups.setdefault(cut(label).lower(), []).append(k)
+        groups.setdefault(label.lower(), []).append(k)
     clashes = []
     for low, keys in groups.items():
         if len(keys) == 1 and low not in taken:
-            out[keys[0]] = cut(full[keys[0]])
+            out[keys[0]] = full[keys[0]]
             taken.add(low)
         else:
             clashes += keys
@@ -158,13 +189,11 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
     return {k: out[k] for k in names}
 
 
-def role(a: Agent) -> str:
-    return CREW_LABEL
-
-
 def boat_label(a: Agent, names: dict[str, str]) -> str:
-    """The label under an agent's boat: its ship's, except that the flagship's own subagents are its crew."""
-    return CREW_LABEL if names and not a.ship and not a.flagship else names.get(a.ship, "")
+    """The label under an agent's boat: its ship's for a ship's own session, its role for a subagent."""
+    if not names:
+        return ""
+    return names.get(a.ship, "") if a.parent_id is None else role(a)
 
 
 def labelled(agents: list[Agent], width: int, height: int) -> bool:
