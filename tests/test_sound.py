@@ -122,3 +122,13 @@ def test_ahoy_wav_is_a_readable_voice_clip():
     with wave.open(str(AHOY_WAV)) as w:
         assert w.getnchannels() == 1 and w.getframerate() == 44100
         assert 0.8 <= w.getnframes() / w.getframerate() <= 2.5
+
+
+def test_a_ship_that_only_keeps_watch_does_not_hold_the_call():
+    # A controller ship on a Monitor shows running for up to half an hour; the flagship's call must not wait on it.
+    s = Snapshot("s1", [ag("main", None, 0, status="idle"),
+                        ag("w/main", None, 0, status="running", ship="w", watching=True, controller=True)], 0, None, True)
+    assert waiting_on_user(s)
+    # An agent ship on watch (a background test run) is still busy: the controller waits on it.
+    s.agents[1].controller = False
+    assert not waiting_on_user(s)

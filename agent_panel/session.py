@@ -13,6 +13,8 @@ from agent_panel.transcript import FileStats, Tail, fold, short_model
 
 MAIN_RUNNING_S = 10  # main "running" = transcript modified this recently
 SUBAGENT_STALE_S = 30  # a subagent whose meta lacks `finished` is done once its file is this quiet
+TOOL_STALE_S = 30 * 60
+REPLY_STALE_S = 5 * 60
 
 
 def slug_dir(cwd: Path, cfg: Path) -> Path:

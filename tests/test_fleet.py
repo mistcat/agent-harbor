@@ -346,3 +346,17 @@ def test_unreadable_or_non_git_also_repos_are_skipped(tmp_path):
 def test_also_repo_naming_the_flagships_own_repo_adds_nothing_twice(tmp_path):
     cfg, a_root, _ = two_repos(tmp_path)
     assert ship_labels(Fleet(a_root, cfg, also_repos=[a_root]).poll()) == ["main", "alpha"]
+
+
+def test_the_main_checkouts_session_is_marked_the_controller(tmp_path):
+    root, (alpha, beta) = repo_with_worktrees(tmp_path)
+    cfg = tmp_path / "cfg"
+    flotilla(cfg, root, "ctrl")
+    flotilla(cfg, alpha, "sa", tool="toolu_a")
+    flotilla(cfg, beta, "sb", tool="toolu_b")
+    roots = {a.id: a for a in Fleet(alpha, cfg).poll().agents if a.parent_id is None}  # the panel beside agent alpha
+    assert {k: (a.controller, a.worktree) for k, a in roots.items()} == {
+        "main": (False, "alpha"), "repo/main": (True, "repo"), "beta/main": (False, "beta")}
+    roots = {a.id: a for a in Fleet(root, cfg).poll().agents if a.parent_id is None}  # beside the controller
+    assert roots["main"].controller and not roots["alpha/main"].controller
+    assert [a.label for a in roots.values()] == ["main", "alpha", "beta"]  # the tree's labels don't change

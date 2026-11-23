@@ -705,12 +705,12 @@ def ships(*names):
 def test_ship_labels_use_the_ticket_id_or_the_first_word():
     assert ship_labels(ships("def-127-grading", "feat-255-wizard", "monitoring-queries", "harbor-ahoy")) == {
         "": FLAGSHIP_LABEL, "def-127-grading": "def-127", "feat-255-wizard": "feat-255",
-        "monitoring-queries": "monitor…", "harbor-ahoy": "harbor"}
+        "monitoring-queries": "agent", "harbor-ahoy": "harbor"}  # a first word past 8 letters: a fixed label, no "…"
     assert ship_labels(ships("feat-077-x", "def-9"))["feat-077-x"] == "feat-077"  # the digits as written
     assert ship_labels(ships("def-9"))["def-9"] == "def-9"
     assert ship_labels(ships("agent-harbor:def-127-grading"))["agent-harbor:def-127-grading"] == "def-127"  # an --also-repo ship
     assert ship_labels(ships("agent-harbor:harbor-prune"))["agent-harbor:harbor-prune"] == "harbor"
-    assert ship_labels(ships("feat-25519-x"))["feat-25519-x"] == "feat-25…"  # a long id takes the ellipsis cut
+    assert ship_labels(ships("feat-25519-x"))["feat-25519-x"] == "feat-25519"  # a ticket id stays whole
     assert ship_labels(ships("default-ui", "def-x"))["default-ui"] == "default"  # not a ticket id
     assert ship_labels(ships("default-ui", "def-x"))["def-x"] == "def"
 
@@ -731,15 +731,17 @@ def test_ships_with_the_same_label_are_numbered():
                                                                  "harbor-labels": "harbor-2"}
 
 
-def test_captain_and_crew_are_reserved():
-    for name in ("crew-x", "crew", "captain-x", "CREW-y"):
+def test_captain_crew_and_the_roles_are_reserved():
+    for name in ("crew-x", "crew", "captain-x", "CREW-y", "review-fixes", "plan-b"):
         label = ship_labels(ships(name))[name]
-        assert label.lower() not in ("crew", "captain"), (name, label)
+        assert label.lower() not in ("crew", "captain", "review", "plan"), (name, label)
 
 
-def test_long_labels_are_cut_with_an_ellipsis():
+def test_long_labels_take_a_fixed_label_not_an_ellipsis():
     label = ship_labels(ships("supercalifragilistic"))["supercalifragilistic"]
-    assert label == "superca…" and len(label) == 8
+    assert label == "agent"
+    assert ship_labels(ships("supercalifragilistic", "antidisestablishment")) == {
+        "": "Captain", "supercalifragilistic": "agent-1", "antidisestablishment": "agent-2"}
 
 
 def test_one_ship_has_no_labels_and_the_same_picture():
@@ -757,7 +759,7 @@ def test_each_boat_carries_its_ships_label_under_the_hull():
     ags = ships("harbor-prune")
     boats, _ = layout(ags, 100, 17, {})
     assert {k: b.label for k, b in boats.items()} == {"main": "Captain", "a1": "crew",
-                                                     "harbor-prune/main": "harbor", "harbor-prune/a1": "harbor"}
+                                                     "harbor-prune/main": "harbor", "harbor-prune/a1": "crew"}
     lines = render_harbor(ags, boats, 100, 17, 0).plain.split("\n")
     for b in boats.values():
         x0, _, _, label_row = rect(b, 17, 0)
@@ -765,11 +767,11 @@ def test_each_boat_carries_its_ships_label_under_the_hull():
         assert "\\" in lines[label_row - 1][x0:x0 + 13]  # the hull is right above it
 
 
-def test_the_captains_subagents_are_crew_and_a_crew_worktree_is_not():
+def test_subagents_with_no_role_are_crew_and_a_crew_worktree_is_not():
     ags = ships("crew-x") + [ag("a2", "main", 1, status="running")]
     boats, _ = layout(ags, 100, 30, {})
-    assert boats["main"].label == "Captain" and boats["a1"].label == boats["a2"].label == "crew"
-    assert boats["crew-x/main"].label == boats["crew-x/a1"].label not in ("crew", "Captain")
+    assert boats["main"].label == "Captain" and boats["a1"].label == boats["a2"].label == boats["crew-x/a1"].label == "crew"
+    assert boats["crew-x/main"].label not in ("crew", "Captain")
     assert all(b.label for b in boats.values())
 
 
@@ -789,9 +791,10 @@ def test_narrow_or_short_harbors_drop_the_labels_first():
 
 
 def test_the_pile_is_named_once_when_the_names_fit():
-    ags = ships("harbor-prune") + [ag(f"d{i}", "harbor-prune/main", 1, status="done", ship="harbor-prune") for i in range(2)]
+    ags = ships("harbor-prune") + [ag(f"d{i}", "harbor-prune/main", 1, "Review the diff", status="done", ship="harbor-prune")
+                                   for i in range(2)]
     lines = render_harbor(ags, {}, 100, 17, 0).plain.split("\n")
-    assert lines[-2][dock_x(100):].split("║")[0].strip() == "harbor"
+    assert lines[-2][dock_x(100):].split("║")[0].strip() == "review"
 
 
 @pytest.mark.parametrize("names", [
@@ -854,3 +857,60 @@ def test_a_tier_upgrade_at_the_right_edge_keeps_the_boat_there():
     assert after["a1"].tier == "galleon"
     assert after["a1"].lane == sub.lane
     assert after["a1"].x == 100 - footprint(False, "galleon")  # nudged left just enough, not re-slotted to x=0
+
+
+# ---- Role labels: the controller is the Captain, a subagent shows what it does ----
+from agent_panel.harbor import role
+
+
+@pytest.mark.parametrize("desc,agent_type,want", [
+    ("Review DEF-197 diff", "general-purpose", "review"),
+    ("Opus review of polish-b diff", "general-purpose", "review"),
+    ("Scoped re-review of wave 2", "general-purpose", "review"),
+    ("Final whole-branch code review", "general-purpose", "review"),
+    ("Write FEAT-013 slice 2 plan", "general-purpose", "plan"),
+    ("PR351 fix wave 2", "general-purpose", "fix"),
+    ("Find pathway verdict consumers", "general-purpose", "explore"),
+    ("Investigate pathway verdict rules", "general-purpose", "explore"),
+    ("Implement the importer", "general-purpose", "build"),
+    ("Run the full suite", "general-purpose", "test"),
+    ("Look at things", "Explore", "explore"),
+    ("Check things", "code-refactoring:code-refactoring-code-reviewer", "review"),
+    ("Something unusual", "general-purpose", "crew"),
+    ("", "", "crew"),
+    ("a1b2c3d4e5f6", "", "crew"),  # the agent id, when there's no description
+])
+def test_a_subagents_role_comes_from_its_description_or_type(desc, agent_type, want):
+    assert role(ag("a1", "main", 1, desc, agent_type=agent_type)) == want
+
+
+def test_an_agent_and_its_reviewer_carry_different_labels():
+    ags = ships("def-197-kit-grading") + [ag("def-197-kit-grading/rev", "def-197-kit-grading/main", 1, "Review DEF-197 diff",
+                                             ship="def-197-kit-grading")]
+    boats, _ = layout(ags, 100, 30, {})
+    assert boats["def-197-kit-grading/main"].label == "def-197"
+    assert boats["def-197-kit-grading/rev"].label == "review"
+
+
+def test_the_controller_ship_is_the_captain_and_an_agent_flagship_keeps_its_ticket():
+    # The panel beside an agent: its flagship is that agent, the main checkout's session is the controller.
+    ags = [ag("main", None, 0, "main", worktree="def-197-kit-grading"), ag("a1", "main", 1, "Review the diff"),
+           ag("ctl/main", None, 0, "campaignmonitor-rails", ship="campaignmonitor-rails", controller=True),
+           ag("n1/main", None, 0, "n1-forms-brand", ship="n1-forms-brand")]
+    assert ship_labels(ags) == {"": "def-197", "campaignmonitor-rails": "Captain", "n1-forms-brand": "n1"}
+    boats, _ = layout(ags, 100, 30, {})
+    assert boats["a1"].label == "review"
+
+
+def test_a_flagship_in_the_main_checkout_or_outside_git_is_the_captain():
+    for extra in ({"controller": True, "worktree": "proj"}, {}):
+        ags = [ag("main", None, 0, "main", **extra), ag("w/main", None, 0, "w", ship="def-1-x")]
+        assert ship_labels(ags)[""] == "Captain", extra
+
+
+@pytest.mark.parametrize("names", [("", "-", "---"), ("x" * 40, "y" * 40), (":", "a:"), ("crew", "captain", "review")])
+def test_labels_are_never_empty_or_cut(names):
+    ags = ships(*names) + [ag(f"{n}/s", f"{n}/main", 1, d, ship=n) for n, d in zip(names, ("", "zzzzzzzzzzzzzzzzzzzz", "a1b2"))]
+    boats, _ = layout(ags, 200, 60, {})
+    assert boats and all(b.label and "…" not in b.label for b in boats.values()), {k: b.label for k, b in boats.items()}
+    assert all("…" not in v and v for v in ship_labels(ags).values())

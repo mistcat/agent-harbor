@@ -19,6 +19,9 @@ class Agent:
     linked: bool = True
     ship: str = ""  # the worktree ship this agent sails with; "" is the flagship's flotilla
     finished_at: float | None = None  # epoch seconds a done subagent last wrote to its transcript
+    watching: bool = False
+    controller: bool = False
+    worktree: str = ""
 
     @property
     def flagship(self) -> bool:

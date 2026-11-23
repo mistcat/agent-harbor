@@ -158,6 +158,10 @@ def ship_labels(agents: list[Agent]) -> dict[str, str]:
     return {k: out[k] for k in names}
 
 
+def role(a: Agent) -> str:
+    return CREW_LABEL
+
+
 def boat_label(a: Agent, names: dict[str, str]) -> str:
     """The label under an agent's boat: its ship's, except that the flagship's own subagents are its crew."""
     return CREW_LABEL if names and not a.ship and not a.flagship else names.get(a.ship, "")
