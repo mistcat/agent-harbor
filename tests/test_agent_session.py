@@ -1250,3 +1250,12 @@ def test_a_worktree_with_no_saved_id_falls_back_to_the_label(world):
     assert "rex open" in world.session("ls").stdout
     assert world.session("peek", "alpha").returncode == 0
     assert ["capture", "-s", "sid-old"] == world.calls()[-1][:3]
+
+
+def test_the_id_is_saved_on_its_own_line_and_read_back_clean(world):
+    (world.repo / ".env").write_text("SECRET=1")  # no trailing newline
+    world.session("new", "alpha")
+    assert (wt_of(world) / ".env").read_text() == "SECRET=1\nAGENT_SESSION_REX_ID=sess-1\n"
+    (wt_of(world) / ".env").write_text('SECRET=1\r\nAGENT_SESSION_REX_ID="sess-1"\r\n')  # edited on another machine
+    world.env["FAKE_SESSIONS"] = renamed(("sess-1", "renamed"))
+    assert "rex open" in world.session("ls").stdout

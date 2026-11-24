@@ -24,9 +24,9 @@ SHIP_LABEL = "agent"  # a worktree whose first word is too long to show whole
 ROLES = (("review", ("review", "reviewer", "audit", "verify", "check")),
          ("plan", ("plan", "design", "spec")),
          ("fix", ("fix", "debug", "repair")),
-         ("test", ("test", "tests", "qa", "run")),
+         ("test", ("test", "tests", "qa", "suite")),
          ("explore", ("explore", "find", "search", "investigate", "look", "locate", "survey", "research", "read")),
-         ("docs", ("doc", "docs", "document", "readme", "write-up")),
+         ("docs", ("doc", "docs", "document", "readme")),
          ("build", ("build", "implement", "write", "add", "make", "create", "port", "refactor", "wave")))
 TICKET = re.compile(r"(?:def|feat)-\d+(?=-|$)", re.IGNORECASE)  # a worktree name that starts with a ticket id
 LABEL_STYLE = "dim"

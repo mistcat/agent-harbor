@@ -196,7 +196,7 @@ rex_id_file() { # rex_id_file <worktree>: the worktree's own git dir (never shar
 
 saved_rex_id() { # saved_rex_id <worktree>: the Rex session ID `new` saved, or nothing
   local id f
-  id="$(grep -E '^AGENT_SESSION_REX_ID=' "$1/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  id="$(grep -E '^AGENT_SESSION_REX_ID=' "$1/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"'"'"' ' || true)"
   if [[ -z "$id" ]] && f="$(rex_id_file "$1")" && [[ -f "$f" ]]; then id="$(head -1 "$f")"; fi
   echo "$id"
 }
@@ -204,6 +204,8 @@ saved_rex_id() { # saved_rex_id <worktree>: the Rex session ID `new` saved, or n
 save_rex_id() { # save_rex_id <worktree> <session-id>
   local f
   if git -C "$1" check-ignore -q .env; then
+    # On a line of its own, even after a copied .env with no final newline.
+    if [[ -s "$1/.env" && -n "$(tail -c 1 "$1/.env")" ]]; then echo >>"$1/.env"; fi
     echo "AGENT_SESSION_REX_ID=$2" >>"$1/.env"
   elif f="$(rex_id_file "$1")"; then
     echo "$2" >"$f"

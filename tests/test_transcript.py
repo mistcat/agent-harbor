@@ -225,3 +225,18 @@ def test_a_persistent_monitor_and_a_stopped_task():
     fold(s, [tool_use("ts", "TaskStop"), tool_result("ts", result={"task_id": "m1", "task_type": "monitor"})],
          skip_sidechain=False)
     assert s.watches == {}
+
+
+def test_an_ended_turn_has_no_open_call():
+    # A result that never got written (a crash mid-tool, then a resume) must not keep the session busy forever after.
+    s = FileStats()
+    fold(s, [tool_use("t1"), user_text("go on"), ended()], skip_sidechain=False)
+    assert s.open_tools == set()
+
+
+def test_a_monitor_timeout_is_capped_at_the_stale_bound():
+    s = FileStats()
+    fold(s, [tool_use("tm", "Monitor"), tool_result("tm", ts="2026-11-13T12:00:00.000Z",
+                                                    result={"taskId": "m1", "timeoutMs": 10**12, "persistent": False})],
+         skip_sidechain=False)
+    assert s.watches == {"m1": epoch("2026-11-13T12:00:00.000Z") + 30 * 60}

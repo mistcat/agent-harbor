@@ -874,6 +874,8 @@ from agent_panel.harbor import role
     ("Investigate pathway verdict rules", "general-purpose", "explore"),
     ("Implement the importer", "general-purpose", "build"),
     ("Run the full suite", "general-purpose", "test"),
+    ("Run the migration", "general-purpose", "crew"),
+    ("Docs write-up for the release", "general-purpose", "docs"),
     ("Look at things", "Explore", "explore"),
     ("Check things", "code-refactoring:code-refactoring-code-reviewer", "review"),
     ("Something unusual", "general-purpose", "crew"),

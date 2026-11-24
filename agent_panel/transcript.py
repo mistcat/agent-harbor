@@ -87,6 +87,8 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
             continue
         stats.turn_ended = msg.get("stop_reason") == "end_turn"
         stats.awaiting_reply = False
+        if stats.turn_ended:  # an ended turn has no client call open, even if a result never got written
+            stats.open_tools.clear()
         if msg.get("model"):
             stats.model = msg["model"]
         if e.get("effort"):
@@ -151,7 +153,7 @@ def _fold_user(stats: FileStats, e: dict, content, ts) -> None:
         if isinstance(r.get("taskId"), str):  # a Monitor: it ends at its own timeout, unless persistent
             ms = r.get("timeoutMs")
             stats.watches[r["taskId"]] = None if r.get("persistent") or start is None or not isinstance(ms, (int, float)) \
-                else start + ms / 1000
+                else start + min(ms / 1000, TOOL_STALE_S)
         elif isinstance(r.get("backgroundTaskId"), str):  # a background command: bounded like a tool call
             stats.watches[r["backgroundTaskId"]] = None if start is None else start + TOOL_STALE_S
         elif isinstance(r.get("task_id"), str):  # TaskStop
