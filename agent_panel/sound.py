@@ -56,8 +56,10 @@ def attention_player(mode: str, enabled: bool) -> Boomer:
 
 def waiting_on_user(snap) -> bool:
     """The flagship's turn has ended and nothing else runs, no subagent and no other worktree's session:
-    the controller waits on the user, not on its fleet."""
-    return snap.turn_ended and not any(a.status == "running" and not a.flagship for a in snap.agents)
+    the controller waits on the user, not on its fleet. A controller ship that only keeps watch (a Monitor on the
+    inbox) doesn't count: it waits on the fleet itself, so the flagship agent's call isn't held for it."""
+    return snap.turn_ended and not any(a.status == "running" and not a.flagship and not (a.watching and a.controller)
+                                       for a in snap.agents)
 
 
 class Attention:

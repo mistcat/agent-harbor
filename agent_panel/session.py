@@ -9,10 +9,15 @@ from datetime import datetime
 from pathlib import Path
 
 from agent_panel.model import Agent
-from agent_panel.transcript import FileStats, Tail, fold, short_model
+from agent_panel.transcript import TOOL_STALE_S, FileStats, Tail, fold, short_model
 
-MAIN_RUNNING_S = 10  # main "running" = transcript modified this recently
-SUBAGENT_STALE_S = 30  # a subagent whose meta lacks `finished` is done once its file is this quiet
+# A session is running while it is busy: a tool call is open, the model owes a reply, a background watch it started
+# is live, or its transcript was written very recently. Each busy state has a bound, so a crash or a killed tool
+# anchors the ship in the end instead of sailing forever.
+MAIN_RUNNING_S = 10  # main "running" = transcript modified this recently, whatever else
+SUBAGENT_STALE_S = 30  # a subagent whose meta lacks `finished` (and is busy with nothing) is done once this quiet
+REPLY_STALE_S = 5 * 60  # a reply owed (after a tool result or a prompt) with no write for this long is stale
+# TOOL_STALE_S (transcript.py, 30 min): an open tool call with no write and no result for this long is stale.
 
 
 def slug_dir(cwd: Path, cfg: Path) -> Path:
@@ -96,6 +101,14 @@ def _break_cycles(kids: dict[str, list], ids: list[str], key) -> None:
         parent[cur] = "main"
 
 
+def busy(stats: FileStats, quiet: float, now: float) -> tuple[bool, bool]:
+    """(busy, only keeping watch) for a transcript last written `quiet` seconds ago."""
+    if stats.open_tools and quiet < TOOL_STALE_S or stats.awaiting_reply and quiet < REPLY_STALE_S:
+        return True, False
+    live = any(now < d if d is not None else quiet < TOOL_STALE_S for d in stats.watches.values())
+    return live, live
+
+
 @dataclass
 class Snapshot:
     session_id: str
@@ -168,7 +181,11 @@ class Watcher:
                 owner[tid] = (oid, i)
 
         main_stats = self._stats[main]
-        agents = [self._agent("main", None, 0, "main", "main", main_stats, "running" if now - _mtime(main) < MAIN_RUNNING_S else "idle", None, True)]
+        quiet = now - _mtime(main)
+        working, watching = busy(main_stats, quiet, now)
+        agents = [self._agent("main", None, 0, "main", "main", main_stats,
+                              "running" if quiet < MAIN_RUNNING_S or working else "idle", None, True)]
+        agents[0].watching = watching and quiet >= MAIN_RUNNING_S
         kids: dict[str, list[tuple[tuple, str, bool]]] = {"main": []}
         for aid in ids:
             tid = metas[aid].get("toolUseId")
@@ -186,17 +203,26 @@ class Watcher:
                 desc = meta.get("description")
                 if not desc and call:
                     desc = self._stats[main if call[0] == "main" else files[call[0]]].agent_calls[meta["toolUseId"]].get("description")
-                fin = meta.get("finished")
-                if fin is None:
-                    fin = files[aid].exists() and now - _mtime(files[aid]) >= SUBAGENT_STALE_S
+                fin = meta.get("finished") is True  # authoritative; a missing (or odd) marker falls back to the transcript
+                working = watching = False
+                if not fin:  # with no transcript yet, the meta file's age (a meta with none at all is done once quiet)
+                    quiet = now - _mtime(files[aid] if files[aid].exists() else sub_dir / f"agent-{aid}.meta.json")
+                    working, watching = busy(stats, quiet, now)
+                    fin = quiet >= SUBAGENT_STALE_S and not working
+                    watching = watching and quiet >= SUBAGENT_STALE_S
                 agent = self._agent(aid, pid, depth, desc or aid, meta.get("agentType") or "", stats,
                                     "done" if fin else "running", meta.get("model"), linked)
+                agent.watching = watching
                 if fin:  # the last entry's timestamp; the file's mtime matches it to within 0.1s on real transcripts
                     agent.finished_at = _epoch(stats.last_entry_at) or _mtime(files[aid]) or None
                 agents.append(agent)
                 add(aid, depth + 1)
 
         add("main", 1)
+        # A foreground Agent call keeps main's own file quiet for as long as the subagent works: main waits on it.
+        if agents[0].status == "idle" and main_stats.open_tools & {m.get("toolUseId") for aid, m in metas.items()
+                                                                   if any(a.id == aid and a.status == "running" for a in agents)}:
+            agents[0].status, agents[0].watching = "running", False
         return Snapshot(main.stem, agents, shots, short_model(main_stats.advisor_model) if main_stats.advisor_model else None,
                         main_stats.turn_ended)
 

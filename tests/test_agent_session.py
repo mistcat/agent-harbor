@@ -118,7 +118,7 @@ def test_new_branches_from_detected_base_and_copies_files(world):
     wt = world.tmp / "proj-worktrees" / "alpha"
     assert git(wt, "branch", "--show-current") == "agent/alpha"
     assert git(wt, "rev-parse", "HEAD") == git(world.repo, "rev-parse", "origin/trunk")
-    assert (wt / ".env").read_text() == "SECRET=1\n"
+    assert (wt / ".env").read_text() == "SECRET=1\nAGENT_SESSION_REX_ID=sess-1\n"  # copied, then the Rex ID saved
     assert (wt / "worker" / ".dev.vars").read_text() == "X=1\n"
     assert not (wt / "missing.txt").exists()
     assert "missing.txt not found" in r.stderr
@@ -1173,3 +1173,89 @@ def test_controller_is_told_to_watch_the_inbox_with_monitor(world):
     prompt = agent_args(world.rex_call("new"))[-1]
     assert "Monitor" in prompt and "agent-session inbox --follow" in prompt
     assert "--peek" in prompt
+
+
+# ---- Agent sessions are found by their Rex session ID, since Rex renames sessions ----
+def renamed(*pairs):
+    return json.dumps({"sessions": [{"session_id": sid, "label": label} for sid, label in pairs]})
+
+
+def wt_of(world, name="alpha"):
+    return world.tmp / "proj-worktrees" / name
+
+
+def saved_id(world, name="alpha"):
+    wt = wt_of(world, name)
+    env = wt / ".env"
+    lines = [l for l in env.read_text().splitlines() if l.startswith("AGENT_SESSION_REX_ID=")] if env.exists() else []
+    if lines:
+        return lines[-1].split("=", 1)[1]
+    f = Path(git(wt, "rev-parse", "--absolute-git-dir")) / "agent-session-rex-id"
+    return f.read_text().strip() if f.exists() else None
+
+
+def test_new_saves_the_rex_id_in_the_worktrees_env(world):
+    assert world.session("new", "alpha").returncode == 0
+    assert (wt_of(world) / ".env").read_text() == "SECRET=1\nAGENT_SESSION_REX_ID=sess-1\n"
+
+
+def test_new_saves_the_rex_id_with_no_env_to_copy(world):
+    (world.repo / ".env").unlink()
+    r = world.session("new", "alpha")
+    assert r.returncode == 0, r.stderr
+    assert saved_id(world) == "sess-1"
+    assert git(wt_of(world), "status", "--porcelain") == ""  # an ignored .env: the tree stays clean
+
+
+def test_without_an_ignored_env_the_id_goes_in_the_worktrees_git_dir(world):
+    # A repo that doesn't ignore .env (agent-harbor itself): a new .env would dirty the tree and block `done`.
+    (world.repo / ".gitignore").write_text(".agent-session/\n")
+    git(world.repo, "commit", "-qam", "track nothing")
+    git(world.repo, "push", "-q", "origin", "trunk")
+    (world.repo / ".env").unlink()
+    assert world.session("new", "alpha").returncode == 0
+    assert not (wt_of(world) / ".env").exists()
+    assert saved_id(world) == "sess-1"
+    assert git(wt_of(world), "status", "--porcelain") == ""
+
+
+def test_a_renamed_agent_session_is_found_by_its_id(world):
+    world.session("new", "alpha")
+    world.env["FAKE_SESSIONS"] = renamed(("sess-1", "harbor-status-labels"))
+    ls = world.session("ls")
+    assert ls.returncode == 0 and "rex open" in ls.stdout, ls.stdout
+    peek = world.session("peek", "alpha")
+    assert peek.returncode == 0, peek.stderr
+    assert ["capture", "-s", "sess-1"] == world.calls()[-1][:3]
+    r = world.session("panel", "alpha")
+    assert r.returncode == 0, r.stderr
+    assert flag([c for c in world.calls() if c[0] == "split"][-1], "-s") == "sess-1"
+    r = world.session("done", "alpha")
+    assert r.returncode == 0, r.stderr
+    assert ["kill", "sess-1"] in [c[:2] for c in world.calls()]
+
+
+def test_a_saved_id_that_is_gone_is_closed_even_if_the_label_is_taken(world):
+    world.session("new", "alpha")
+    world.env["FAKE_SESSIONS"] = renamed(("sess-other", "proj-alpha"))  # someone else's session took the label
+    assert "rex closed" in world.session("ls").stdout
+    assert world.session("peek", "alpha").returncode != 0
+
+
+def test_a_worktree_with_no_saved_id_falls_back_to_the_label(world):
+    world.session("new", "alpha")
+    env = wt_of(world) / ".env"
+    env.write_text("SECRET=1\n")  # made before IDs were saved
+    world.env["FAKE_SESSIONS"] = renamed(("sid-old", "proj-alpha"))
+    assert "rex open" in world.session("ls").stdout
+    assert world.session("peek", "alpha").returncode == 0
+    assert ["capture", "-s", "sid-old"] == world.calls()[-1][:3]
+
+
+def test_the_id_is_saved_on_its_own_line_and_read_back_clean(world):
+    (world.repo / ".env").write_text("SECRET=1")  # no trailing newline
+    world.session("new", "alpha")
+    assert (wt_of(world) / ".env").read_text() == "SECRET=1\nAGENT_SESSION_REX_ID=sess-1\n"
+    (wt_of(world) / ".env").write_text('SECRET=1\r\nAGENT_SESSION_REX_ID="sess-1"\r\n')  # edited on another machine
+    world.env["FAKE_SESSIONS"] = renamed(("sess-1", "renamed"))
+    assert "rex open" in world.session("ls").stdout

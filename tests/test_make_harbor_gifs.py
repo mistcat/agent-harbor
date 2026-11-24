@@ -77,9 +77,9 @@ def test_crowded_harbor_labels_never_touch_a_wake():
                 assert not (sa == LABEL_STYLE and wake_b or wake_a and sb == LABEL_STYLE), "".join(c for c, _ in row)
 
 
-def test_crowded_harbor_shows_ticket_labels_captain_and_crew():
+def test_crowded_harbor_shows_ticket_labels_captain_and_roles():
     text = "\n".join(_plain("crowded-harbor"))
-    for label in ("Captain", "crew", "def-127", "def-128", "feat-255"):
+    for label in ("Captain", "test", "docs", "def-127", "def-128", "feat-255"):
         assert label in text
     assert "more" not in text  # every ship and boat has room
 
@@ -135,7 +135,7 @@ def test_mobile_crowded_harbor_labels_never_touch_a_wake():
 
 def test_mobile_crowded_harbor_shows_every_label():
     text = "\n".join(_mobile_plain("crowded-harbor"))
-    for label in ("Captain", "crew", "def-127", "def-128", "feat-255"):
+    for label in ("Captain", "test", "docs", "def-127", "def-128", "feat-255"):
         assert label in text
     assert "more" not in text
 

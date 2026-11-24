@@ -6,7 +6,10 @@ tool_use's input.model is optional, and a subagent .meta.json may lack `finished
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+TOOL_STALE_S = 30 * 60  # an open tool call (or a background command) with no write for this long is stale
 
 
 class Tail:
@@ -58,6 +61,9 @@ class FileStats:
     seen_ids: set[str] = field(default_factory=set)
     last_entry_at: str | None = None
     turn_ended: bool = False  # the last assistant message ended the turn and no prompt has come since
+    open_tools: set[str] = field(default_factory=set)  # client tool calls with no tool_result yet
+    awaiting_reply: bool = False  # a tool result or a prompt came in: the model speaks next
+    watches: dict[str, float | None] = field(default_factory=dict)  # background task id -> deadline (epoch), if any
 
 
 def _count(v) -> int:
@@ -75,11 +81,14 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
         if ts:
             stats.last_entry_at = ts
         msg = e.get("message")
-        if e.get("type") == "user" and isinstance(msg, dict) and not e.get("isMeta") and _is_prompt(msg.get("content")):
-            stats.turn_ended = False
+        if e.get("type") == "user" and isinstance(msg, dict):
+            _fold_user(stats, e, msg.get("content"), ts)
         if e.get("type") != "assistant" or not isinstance(msg, dict):
             continue
         stats.turn_ended = msg.get("stop_reason") == "end_turn"
+        stats.awaiting_reply = False
+        if stats.turn_ended:  # an ended turn has no client call open, even if a result never got written
+            stats.open_tools.clear()
         if msg.get("model"):
             stats.model = msg["model"]
         if e.get("effort"):
@@ -96,6 +105,8 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
                 continue
+            if b.get("type") == "tool_use" and b.get("id"):
+                stats.open_tools.add(b["id"])
             if b.get("type") == "tool_use" and b.get("name") == "Agent" and b.get("id"):
                 inp = b.get("input") if isinstance(b.get("input"), dict) else {}
                 stats.agent_calls[b["id"]] = {
@@ -108,6 +119,59 @@ def fold(stats: FileStats, entries: list[dict], skip_sidechain: bool) -> int:
                 new_advisor += 1
                 stats.last_advisor_at = ts or stats.last_advisor_at
     return new_advisor
+
+
+INTERRUPT = "[Request interrupted by user"
+NO_REPLY = ("<bash-input>", "<bash-stdout>", "<bash-stderr>", "<local-command-", "<command-name>", "<command-message>")
+TASK_ID = re.compile(r"<task-id>([^<]+)</task-id>")
+TASK_ENDED = re.compile(r"<status>[^<]+</status>|\[Monitor expired")
+
+
+def _epoch(ts) -> float | None:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _text(content) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text") \
+        if isinstance(content, list) else ""
+
+
+def _fold_user(stats: FileStats, e: dict, content, ts) -> None:
+    """A user entry: tool results close calls and start background watches; a prompt or a task notification owes
+    the model a reply; an interrupt hands the turn back to the person."""
+    results = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"] if isinstance(content, list) else []
+    for b in results:
+        stats.open_tools.discard(b.get("tool_use_id"))
+    r = e.get("toolUseResult")
+    if results and isinstance(r, dict):
+        start = _epoch(ts)
+        if isinstance(r.get("taskId"), str):  # a Monitor: it ends at its own timeout, unless persistent
+            ms = r.get("timeoutMs")
+            stats.watches[r["taskId"]] = None if r.get("persistent") or start is None or not isinstance(ms, (int, float)) \
+                else start + min(ms / 1000, TOOL_STALE_S)
+        elif isinstance(r.get("backgroundTaskId"), str):  # a background command: bounded like a tool call
+            stats.watches[r["backgroundTaskId"]] = None if start is None else start + TOOL_STALE_S
+        elif isinstance(r.get("task_id"), str):  # TaskStop
+            stats.watches.pop(r["task_id"], None)
+    text = _text(content)
+    if text.startswith("<task-notification>") and (m := TASK_ID.search(text)) and TASK_ENDED.search(text):
+        stats.watches.pop(m.group(1).strip(), None)
+    if text.startswith(INTERRUPT):
+        stats.open_tools.clear()
+        stats.turn_ended = stats.awaiting_reply = False  # as before: no end_turn, so no attention call
+        return
+    if e.get("isMeta"):
+        return
+    if results:
+        stats.awaiting_reply = True
+    elif _is_prompt(content):
+        stats.turn_ended = False
+        stats.awaiting_reply = not e.get("isCompactSummary") and not text.lstrip().startswith(NO_REPLY)
 
 
 def _is_prompt(content) -> bool:

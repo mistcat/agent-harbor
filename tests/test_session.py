@@ -294,3 +294,139 @@ def test_a_transcript_replaced_by_a_larger_file_is_read_from_the_start(tmp_path)
     write_jsonl(new, [assistant(f"z{i}", OPUS, {"output_tokens": 1}) for i in range(40)])
     os.replace(new, p)  # a new file in its place, larger than the offset already read
     assert w.poll().agents[0].burn == 40
+
+
+# ---- Running means busy: an open tool call, a reply owed, a live watch, or a recent write ----
+from agent_panel.session import REPLY_STALE_S, TOOL_STALE_S
+from tests.test_transcript import ended, tool_result, tool_use, user_text
+
+
+def session_file(proj: Path, entries, mtime, sid="sess1"):
+    p = proj / f"{sid}.jsonl"
+    write_jsonl(p, entries)
+    os.utime(p, (mtime, mtime))
+    return p
+
+
+def sub_file(proj: Path, aid, entries, mtime, tool_use_id="toolu_1", finished=None, sid="sess1"):
+    d = proj / sid / "subagents"
+    write_jsonl(d / f"agent-{aid}.jsonl", entries)
+    os.utime(d / f"agent-{aid}.jsonl", (mtime, mtime))
+    m = {"agentType": "general-purpose", "description": "Review the diff", "toolUseId": tool_use_id}
+    if finished is not None:
+        m["finished"] = finished
+    (d / f"agent-{aid}.meta.json").write_text(json.dumps(m))
+
+
+def test_stale_bounds():
+    # Long test suites and CI waits run for many minutes; half an hour without a single write or result is not a
+    # tool call any more. A reply owed is seconds, rarely minutes.
+    assert TOOL_STALE_S == 30 * 60 and REPLY_STALE_S == 5 * 60
+
+
+def test_a_tool_call_in_progress_with_a_quiet_transcript_is_running(tmp_path):
+    session_file(tmp_path, [tool_use("t1")], mtime=1000)
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=1000 + 600))["main"].status == "running"
+    assert by_id(w.poll(now=1000 + TOOL_STALE_S - 1))["main"].status == "running"
+
+
+def test_a_stale_tool_call_falls_back_to_idle(tmp_path):
+    # A crash or a killed tool writes nothing more: after the bound the ship anchors.
+    session_file(tmp_path, [tool_use("t1")], mtime=1000)
+    assert by_id(Watcher(tmp_path).poll(now=1000 + TOOL_STALE_S))["main"].status == "idle"
+
+
+def test_an_ended_turn_is_idle(tmp_path):
+    session_file(tmp_path, [tool_use("t1"), tool_result("t1"), ended()], mtime=1000)
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=1000 + 20))["main"].status == "idle"
+    assert by_id(w.poll(now=1000 + 5))["main"].status == "running"  # a fresh write still counts
+
+
+def test_an_interrupted_turn_is_idle(tmp_path):
+    session_file(tmp_path, [tool_use("t1"), tool_result("t1"),
+                            user_text([{"type": "text", "text": "[Request interrupted by user for tool use]"}])], mtime=1000)
+    assert by_id(Watcher(tmp_path).poll(now=1000 + 20))["main"].status == "idle"
+
+
+def test_a_reply_owed_is_running_until_its_bound(tmp_path):
+    # The model is thinking after a tool result: its next write can be a minute away.
+    session_file(tmp_path, [tool_use("t1"), tool_result("t1")], mtime=1000)
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=1000 + 90))["main"].status == "running"
+    assert by_id(w.poll(now=1000 + REPLY_STALE_S))["main"].status == "idle"
+
+
+def monitor(deadline_ms=600000, persistent=False):
+    return [tool_use("tm", "Monitor"), tool_result("tm", ts="2026-11-13T12:00:00.000Z",
+                                                  result={"taskId": "m1", "timeoutMs": deadline_ms, "persistent": persistent}),
+            ended("watching the inbox")]
+
+
+T0 = 1794571200.0  # 2026-11-13T12:00:00Z
+
+
+def test_a_controller_on_watch_is_running_until_the_watch_expires(tmp_path):
+    # Its turn ended, but a Monitor will wake it: it waits on its fleet, not on the user.
+    session_file(tmp_path, monitor(), mtime=T0)
+    w = Watcher(tmp_path)
+    a = by_id(w.poll(now=T0 + 300))["main"]
+    assert (a.status, a.watching) == ("running", True)
+    a = by_id(w.poll(now=T0 + 600))["main"]
+    assert (a.status, a.watching) == ("idle", False)
+
+
+def test_a_persistent_watch_is_bounded_by_the_quiet(tmp_path):
+    session_file(tmp_path, monitor(persistent=True), mtime=T0)
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=T0 + TOOL_STALE_S - 1))["main"].status == "running"
+    assert by_id(w.poll(now=T0 + TOOL_STALE_S))["main"].status == "idle"
+
+
+def test_a_busy_session_is_not_watching(tmp_path):
+    session_file(tmp_path, [tool_use("t1")], mtime=1000)
+    assert by_id(Watcher(tmp_path).poll(now=1000 + 60))["main"].watching is False
+
+
+def test_a_subagent_in_a_quiet_tool_call_is_running(tmp_path):
+    session_file(tmp_path, [agent_call_entry("toolu_1")], mtime=1000)
+    sub_file(tmp_path, "a1", [tool_use("t-sub")], mtime=1000)  # meta lacks `finished`, file quiet 10 min
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=1000 + 600))["a1"].status == "running"
+    assert by_id(w.poll(now=1000 + TOOL_STALE_S))["a1"].status == "done"  # stale: never running forever
+
+
+def test_a_subagents_finished_marker_stays_authoritative(tmp_path):
+    session_file(tmp_path, [agent_call_entry("toolu_1")], mtime=1000)
+    sub_file(tmp_path, "a1", [tool_use("t-sub")], mtime=1000, finished=True)
+    assert by_id(Watcher(tmp_path).poll(now=1000 + 5))["a1"].status == "done"
+
+
+def test_a_subagent_that_ended_its_turn_is_done_once_quiet(tmp_path):
+    session_file(tmp_path, [agent_call_entry("toolu_1")], mtime=1000)
+    sub_file(tmp_path, "a1", [tool_use("t-sub"), tool_result("t-sub"), ended("report")], mtime=1000)
+    w = Watcher(tmp_path)
+    assert by_id(w.poll(now=1000 + 10))["a1"].status == "running"
+    assert by_id(w.poll(now=1000 + 30))["a1"].status == "done"
+
+
+def test_finished_false_is_not_running_forever(tmp_path):
+    session_file(tmp_path, [agent_call_entry("toolu_1")], mtime=1000)
+    sub_file(tmp_path, "a1", [ended("report")], mtime=1000, finished=False)
+    assert by_id(Watcher(tmp_path).poll(now=1000 + 120))["a1"].status == "done"
+
+
+def test_main_waiting_on_its_running_subagent_is_running_past_the_bound(tmp_path):
+    # A foreground Agent call keeps main's file quiet for as long as the subagent works.
+    session_file(tmp_path, [agent_call_entry("toolu_1")], mtime=1000)
+    sub_file(tmp_path, "a1", [tool_use("t-sub")], mtime=1000 + TOOL_STALE_S + 50)
+    snap = Watcher(tmp_path).poll(now=1000 + TOOL_STALE_S + 60)
+    assert by_id(snap)["a1"].status == "running"
+    assert by_id(snap)["main"].status == "running"
+
+
+def agent_call_entry(tid):
+    e = assistant("m-" + tid, OPUS, U, blocks=[agent_call(tid, "Review the diff")])
+    e["message"]["stop_reason"] = "tool_use"
+    return e
